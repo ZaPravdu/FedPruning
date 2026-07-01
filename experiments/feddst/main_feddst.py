@@ -11,6 +11,9 @@ import setproctitle
 import torch
 import wandb
 
+# Ensure CWD is the script directory so relative paths work correctly
+os.chdir(os.path.dirname(os.path.abspath(__file__)))
+
 # add the FedML root directory to the python path
 sys.path.insert(0, os.path.abspath(os.path.join(os.getcwd(), "./../../../")))
 sys.path.insert(0, os.path.abspath(os.path.join(os.getcwd(), "./../../")))
@@ -27,7 +30,7 @@ from api.data_preprocessing.tinyimagenet.data_loader import load_partition_data_
 
 from api.model.cv.resnet_gn import resnet18 as resnet18_gn
 from api.model.cv.mobilenet import mobilenet
-from api.model.cv.resnet import resnet18, resnet56
+from api.model.cv.resnet import add_gate_to_conv, add_vd_to_conv, resnet18, resnet56
 from api.model.nlp.gpt2 import GPT2Model, GPT2Config
 from torchvision.models import mobilenet_v3_small as MobileNetV3
 from torchvision.models import efficientnet_v2_s as EfficientNetV2
@@ -48,7 +51,13 @@ def add_args(parser):
     return a parser added with args required by fit
     """
     # Training settings
-    parser.add_argument("--model", type=str, default="resnet56", metavar="N", help="neural network used in training")
+    parser.add_argument(
+        "--model",
+        type=str,
+        default="resnet56",
+        metavar="N",
+        help="neural network used in training, e.g. resnet18, gated_resnet18, resnet56",
+    )
 
     parser.add_argument("--dataset", type=str, default="cifar10", metavar="N", help="dataset used for training")
 
@@ -80,9 +89,112 @@ def add_args(parser):
     parser.add_argument('--lr', type=float, default=0.001, metavar='LR',
                         help='learning rate (default: 0.001)')
 
+    parser.add_argument(
+        "--local_refinement",
+        action="store_true",
+        default=False,
+        help="client prunes mask on receive from server, skips prune/grow in mode 2",
+    )
+
+    parser.add_argument(
+        "--reg_adjust_only",
+        action="store_true",
+        help="only compute regularization in adjustment rounds (mode 2/3)",
+    )
+
+    parser.add_argument(
+        "--gate_p",
+        type=float,
+        default=0.85,
+        help="keep channels until cumulative softmax gate mass reaches p",
+    )
+
+    parser.add_argument(
+        "--reopen_gate_on_adjust",
+        type=int,
+        default=1,
+        help="whether to reopen gated channels before adaptive epochs in adjustment rounds",
+    )
+
+    parser.add_argument(
+        "--gate_reg_eps",
+        type=float,
+        default=1e-6,
+        help="epsilon for numerical stability in gate-aware regularisation",
+    )
+
+    parser.add_argument(
+        "--aggregate_gate",
+        type=int,
+        default=0,
+        help="whether to log gate-guided sparsity statistics on server side",
+    )
+
+    parser.add_argument(
+        "--adjustment_type",
+        type=str,
+        default="",
+        choices=["", "mag", "mag_cdf", "mag_grad_mag", "channel_l1_cdf"],
+        help="pruning strategy in adjustment rounds (default: original prune+grow). options: mag | mag_cdf | mag_grad_mag | channel_l1_cdf",
+    )
+
+    parser.add_argument(
+        "--density_cutoff",
+        action="store_true",
+        default=False,
+        help="CDF compression strategy: 2x init density + halt pruning+reg when density < target",
+    )
+
+    parser.add_argument(
+        "--reg_mode",
+        type=str,
+        default="none",
+        choices=["none", "l1", "ns", "nard", "channel", "original",
+                 "gate_l1", "weight_l1_over_gate", "weight_l2_over_gate"],
+        help="regularization mode: none | l1 (standard) | ns (network slimming on BN gamma L1) "
+             "| nard (norm-based ARD: 1/gamma^2 * ||w||^2 + log(gamma^2)) "
+             "| channel/original (VD) "
+             "| gate_l1/weight_l1_over_gate/weight_l2_over_gate (gated)",
+    )
+
+    parser.add_argument(
+        "--reg_weight",
+        type=float,
+        default=0.0,
+        help="unified coefficient for the active regularization (0=disabled)",
+    )
+
+    parser.add_argument(
+        "--vd_ard_init",
+        type=float,
+        default=-10.0,
+        help="initial log_alpha value for variational dropout",
+    )
+
+    parser.add_argument(
+        "--vd_thresh",
+        type=float,
+        default=3.0,
+        help="log_alpha pruning threshold (only used in 'original' mode, default 3)",
+    )
+
+    parser.add_argument(
+        "--vd_train_clip",
+        type=int,
+        default=0,
+        help="zero weights with log_alpha >= thresh during training "
+             "(only used in 'original' mode, default 0)",
+    )
+
     parser.add_argument("--epochs", type=int, default=5, metavar="EP", help="how many epochs will be trained locally")
 
-    parser.add_argument("--A_epochs", type=int, default=0, metavar="EP", help="how many epochs will be trained before pruning and growing ")
+    parser.add_argument(
+        "--A_epochs",
+        type=int,
+        default=None,
+        metavar="EP",
+        help="how many epochs will be trained before pruning and growing; default uses half of local epochs in adjustment rounds",
+    )
 
     parser.add_argument("--comm_round", type=int, default=10, help="how many round of communications we shoud use")
 
@@ -92,7 +204,10 @@ def add_args(parser):
         help='the distribution of layerwise density and the pruning method, options["uniform_magnitude", "ER_magnitude", "ERK_magnitude"]')
 
     parser.add_argument('--target_density', type=float, default=0.5,
-                        help='pruning target density')
+                        help='CDF lock floor / pruning target density')
+
+    parser.add_argument('--init_density', type=float, default=None,
+        help='ERK initialization density (default: equals target_density)')
 
     parser.add_argument('--delta_T', type=int, default=10, help='delta t for update')
 
@@ -101,6 +216,15 @@ def add_args(parser):
     parser.add_argument("--adjust_alpha", type=float, default=0.2, help='the ratio of num elements for adjustments')
 
     parser.add_argument("--adjustment_epochs", type=int, default=None, help=" the number of local apoches used in model adjustment round, if it is set None, it is equal to the number of epoches for training round" )
+
+    parser.add_argument(
+        "--density_scheduler",
+        type=float,
+        nargs=2,
+        default=None,
+        metavar=("FINAL_DENSITY", "SCHEDULE_ROUNDS"),
+        help="cubic density schedule: init_density -> FINAL_DENSITY over SCHEDULE_ROUNDS rounds",
+    )
 
     # Following arguments are seldom changed
     parser.add_argument(
@@ -121,7 +245,7 @@ def add_args(parser):
     parser.add_argument("--gpu_num_per_server", type=int, default=4, help="gpu_num_per_server")
 
     parser.add_argument(
-        "--is_mobile", type=int, default=1, help="whether the program is running on the FedML-Mobile server side"
+        "--is_mobile", type=int, default=0, help="whether the program is running on the FedML-Mobile server side"
     )
 
     parser.add_argument("--backend", type=str, default="MPI", help="Backend for Server and Client")
@@ -193,8 +317,15 @@ def create_model(args, model_name, output_dim):
     model = None
     if model_name == "resnet18_gn":
         model = resnet18_gn(num_classes=output_dim)
-    if model_name == "resnet18":
+    elif model_name == "resnet18":
         model = resnet18(class_num=output_dim)
+    elif model_name == "gated_resnet18":
+        model = resnet18(class_num=output_dim)
+        add_gate_to_conv(model)
+    elif model_name == "vd_resnet18":
+        model = resnet18(class_num=output_dim)
+        add_vd_to_conv(model, ard_init=args.vd_ard_init, mode=args.reg_mode,
+                        thresh=args.vd_thresh, train_clip=bool(args.vd_train_clip))
     elif model_name == "resnet56":
         model = resnet56(class_num=output_dim)
     elif model_name == "mobilenet":
@@ -302,8 +433,12 @@ if __name__ == "__main__":
     # Note if the model is DNN (e.g., ResNet), the training will be very slow.
     # In this case, please use our FedML distributed version (./experiments/distributed_fedprune)
     inner_model = create_model(args, model_name=args.model, output_dim=dataset[7])
-    # create the sparse model
-    model = SparseModel(inner_model, target_density=args.target_density, strategy=args.pruning_strategy)
+    # init_density overrides target_density for ERK initialization
+    # target_density is kept as floor_density for CDF lock
+    init_density = args.init_density if args.init_density is not None else args.target_density
+    model = SparseModel(inner_model, target_density=init_density,
+                        floor_density=args.target_density,
+                        strategy=args.pruning_strategy)
 
     # start distributed training
     FedML_FedDST_distributed(

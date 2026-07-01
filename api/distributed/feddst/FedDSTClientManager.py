@@ -1,7 +1,8 @@
+import json
 import logging
 import os
 import sys
-import time 
+import time
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.getcwd(), "../../../")))
 
@@ -22,6 +23,7 @@ class FedDSTClientManager(ClientManager):
         self.num_rounds = args.comm_round
         self.round_idx = 0
         self.mode = 0
+        self._last_density = 1.0
 
     # mode 0: the client receieve both weight and mask from server;  config the new weight and mask, train; send the weight
     # mode 1: the client receieve weights;  config the new weight, train;  send the weight,
@@ -43,6 +45,9 @@ class FedDSTClientManager(ClientManager):
         self.mode = msg_params.get(MyMessage.MSG_ARG_KEY_MODE_CODE)
         self.round_idx =  msg_params.get(MyMessage.MSG_ARG_KEY_ROUND_IDX)
 
+        self.args.pruning_active = msg_params.msg_params.get(MyMessage.MSG_ARG_KEY_PRUNING_ACTIVE, True)
+        logging.info(f"Client init: received pruning_active={self.args.pruning_active}")
+
         if self.args.is_mobile == 1:
             global_model_params = transform_list_to_tensor(global_model_params)
 
@@ -57,6 +62,9 @@ class FedDSTClientManager(ClientManager):
         self.mode = msg_params.get(MyMessage.MSG_ARG_KEY_MODE_CODE)
         self.round_idx =  msg_params.get(MyMessage.MSG_ARG_KEY_ROUND_IDX)
 
+        self.args.pruning_active = msg_params.msg_params.get(MyMessage.MSG_ARG_KEY_PRUNING_ACTIVE, True)
+        logging.info(f"Client round {self.round_idx}: received pruning_active={self.args.pruning_active}")
+
         if self.args.is_mobile == 1:
             model_params = transform_list_to_tensor(model_params)
 
@@ -64,27 +72,47 @@ class FedDSTClientManager(ClientManager):
             mask_dict = msg_params.get(MyMessage.MSG_ARG_KEY_MODEL_MASKS)
             self.trainer.trainer.model.mask_dict = mask_dict
             self.trainer.trainer.model.apply_mask()
-            
+
         self.trainer.update_model(model_params)
         self.trainer.update_dataset(int(client_index))
+
+        # local refinement 下移至 trainer（有数据），此处只保留密度日志
+        if self.mode in [0,3] and getattr(self.args, "local_refinement", False):
+            if getattr(self.args, "density_cutoff", False) and self._last_density <= self.args.target_density:
+                logging.info(f"[LOCAL_REF] round={self.round_idx} SKIP "
+                             f"(last_density={self._last_density:.4f} <= target={self.args.target_density})")
+
         self.__train()
         if self.round_idx == self.num_rounds:
+            # write diagnostics JSON (client process)
+            out_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "../../../experiments/feddst/results")
+            os.makedirs(out_dir, exist_ok=True)
+            out_path = os.path.join(out_dir, f"density_debug_rank{self.get_sender_id()}.json")
+            diag = getattr(self.trainer.trainer, "diagnostics", None)
+            if diag:
+                diag["rank"] = self.get_sender_id()
+                diag["config"]["rounds_total"] = self.num_rounds
+                with open(out_path, "w") as f:
+                    json.dump(diag, f, indent=2, default=str)
+                logging.info(f"[DIAGNOSTICS] client rank {self.get_sender_id()} JSON written to {out_path}")
             # post_complete_message_to_sweep_process(self.args)
             time.sleep(60)
             self.finish()
 
-    def send_model_to_server(self, receive_id, weights, local_sample_num, masks=None):
+    def send_model_to_server(self, receive_id, weights, local_sample_num, density, masks=None):
         message = Message(MyMessage.MSG_TYPE_C2S_SEND_MODEL_TO_SERVER, self.get_sender_id(), receive_id)
         message.add_params(MyMessage.MSG_ARG_KEY_MODEL_PARAMS, weights)
         message.add_params(MyMessage.MSG_ARG_KEY_MODEL_MASKS, masks)
         message.add_params(MyMessage.MSG_ARG_KEY_NUM_SAMPLES, local_sample_num)
+        message.add_params(MyMessage.MSG_ARG_KEY_DENSITY, density)
         self.send_message(message)
 
 
     def __train(self):
         logging.info("#######training########### round_id = %d" % self.round_idx)
         weights, masks, local_sample_num = self.trainer.train(mode = self.mode, round_idx=self.round_idx, )
+        self._last_density = self.trainer.trainer.model.compute_gate_guided_density()
         if self.mode in [2, 3]:
-            self.send_model_to_server(0, weights, local_sample_num, masks)
+            self.send_model_to_server(0, weights, local_sample_num, self._last_density, masks)
         else:
-            self.send_model_to_server(0, weights, local_sample_num)
+            self.send_model_to_server(0, weights, local_sample_num, self._last_density)

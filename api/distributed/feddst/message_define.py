@@ -25,7 +25,10 @@ class MyMessage(object):
     MSG_ARG_KEY_CLIENT_INDEX = "client_idx"
 
     MSG_ARG_KEY_MODE_CODE = "mode_code"
-    MSG_ARG_KEY_ROUND_IDX = "round_idx" 
+    MSG_ARG_KEY_ROUND_IDX = "round_idx"
+
+    MSG_ARG_KEY_PRUNING_ACTIVE = "pruning_active"
+    MSG_ARG_KEY_DENSITY = "density"
 
     # MSG_ARG_KEY_TRAIN_CORRECT = "train_correct"
     # MSG_ARG_KEY_TRAIN_ERROR = "train_error"

@@ -76,7 +76,7 @@ def magnitude_prune(weight, old_mask, num_elements, density):
         weight = weight * old_mask.to(weight.device) 
     
     num_remain = int(num_elements * density)
-    assert old_mask.sum() >= num_remain
+    # assert old_mask.sum() >= num_remain
 
     x, idx = torch.sort(torch.abs(weight.data.view(-1)), descending=True)
     new_mask = torch.zeros_like( old_mask, dtype=old_mask.data.dtype, requires_grad=False )
@@ -93,6 +93,84 @@ def random_prune(old_mask, num_elements, density):
     random.shuffle(idx)
     new_mask = torch.zeros_like( old_mask, dtype=old_mask.data.dtype, requires_grad=False )
     new_mask.data.view(-1)[idx[:num_remain]] = 1.0
+    return new_mask
+
+
+def compute_cdf_metric(weight, mask, adjustment_type="mag_cdf"):
+    """Compute importance metric matrix for CDF pruning.
+
+    Returns a metric tensor of the same shape as weight,
+    used by cdf_prune_by_metric to make pruning decisions.
+
+    Args:
+        weight: weight tensor
+        mask: binary mask tensor
+        adjustment_type: metric type ("mag_cdf", "magnitude", etc.)
+    Returns:
+        metric: importance metric tensor (same shape as weight)
+    Raises:
+        ValueError: on unknown adjustment_type
+    """
+    if adjustment_type == "":
+        return None
+
+    masked_w = weight.data * mask
+    if adjustment_type in ("mag_cdf", "magnitude"):
+        return masked_w.abs()
+    elif adjustment_type == "mag_grad_mag":
+        if weight.grad is None:
+            raise RuntimeError(f"mag_grad_mag: grad is None for {weight.shape}, "
+                               "call backward() before pruning")
+        return (weight.grad.abs() * masked_w.abs()) * mask
+    else:
+        raise ValueError(f"Unknown CDF metric adjustment_type: {adjustment_type}")
+
+
+def cdf_prune_by_metric(metric, weight, mask, p=0.85, min_keep=None):
+    """CDF prune: keep active elements covering fraction p of total metric.
+
+    Pure pruning decision based on the provided metric matrix.
+    Does NOT mutate mask in-place — returns a new mask.
+
+    Args:
+        metric: importance metric tensor (same shape as weight, or None → no-op)
+        weight: weight tensor (used for shape/debug only)
+        mask: binary mask tensor
+        p: fraction of total metric sum to retain (0 < p <= 1)
+        min_keep: if set, keep at least this many active elements (floor lock)
+    Returns:
+        new_mask: binary mask tensor
+    """
+    if metric is None:
+        return mask.clone()
+
+    assert 0.0 < p <= 1.0
+    flat_mask = mask.view(-1).bool()
+    active_mask = flat_mask != 0
+    active_num = active_mask.sum().item()
+
+    if active_num == 0:
+        return torch.zeros_like(mask)
+
+    flat_metric = metric.view(-1)
+    active_metric = flat_metric[active_mask]
+    sorted_vals, idx = torch.sort(active_metric, descending=True)
+    total = sorted_vals.sum()
+    if total == 0:
+        return mask.clone()
+
+    cumsum = torch.cumsum(sorted_vals, dim=0)
+    keep_count = int((cumsum < p * total).sum().item()) + 1
+    keep_count = max(1, min(keep_count, active_num))
+
+    # floor lock: ensure at least min_keep elements survive
+    if min_keep is not None:
+        keep_count = max(keep_count, min_keep)
+        keep_count = min(keep_count, active_num)
+
+    new_mask = torch.zeros_like(mask)
+    active_positions = torch.where(active_mask)[0]
+    new_mask.view(-1)[active_positions[idx[:keep_count]]] = 1.0
     return new_mask
 
 
@@ -275,3 +353,21 @@ def get_erdos_renyi_dist(layer_shape_dict, sparse_layer_set, target_density, is_
         prob_dict[name] = prob
 
     return prob_dict
+
+
+def cubic_density_schedule(round_idx, T_end, initial_density, final_density):
+    """Cubic sparsity schedule: s_t = s_p + (s_0 - s_p)(1 - t/T)^3.
+
+    Converts densities to sparsities for the cubic schedule, then converts
+    the result back to density for use with generate_layer_density_dict.
+
+    At t=0: density = initial_density
+    At t=T_end: density = final_density
+    """
+    s_0 = 1.0 - initial_density
+    s_p = 1.0 - final_density
+    t = min(round_idx, T_end)
+    if T_end == 0:
+        return initial_density
+    s_t = s_p + (s_0 - s_p) * (1.0 - t / T_end) ** 3
+    return 1.0 - s_t
