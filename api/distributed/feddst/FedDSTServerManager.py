@@ -1,10 +1,11 @@
+import json
 import logging
 import os, signal
 import sys
 
 from .message_define import MyMessage
 from .utils import transform_tensor_to_list, post_complete_message_to_sweep_process
-from api.pruning.init_scheme import generate_layer_density_dict, pruning
+from api.pruning.init_scheme import cubic_density_schedule, generate_layer_density_dict, pruning
 import torch
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.getcwd(), "../../../")))
@@ -75,26 +76,81 @@ class FedDSTServerManager(ServerManager):
         sender_id = msg_params.get(MyMessage.MSG_ARG_KEY_SENDER)
         model_params = msg_params.get(MyMessage.MSG_ARG_KEY_MODEL_PARAMS)
         local_sample_number = msg_params.get(MyMessage.MSG_ARG_KEY_NUM_SAMPLES)
+        density = msg_params.get(MyMessage.MSG_ARG_KEY_DENSITY)
         if self.mode in [2, 3]:
             masks = msg_params.get(MyMessage.MSG_ARG_KEY_MODEL_MASKS)
             self.aggregator.add_local_trained_mask(sender_id - 1, masks)
-            
-        self.aggregator.add_local_trained_result(sender_id - 1, model_params, local_sample_number)
+
+        self.aggregator.add_local_trained_result(sender_id - 1, model_params, local_sample_number, density)
         b_all_received = self.aggregator.check_whether_all_receive()
         logging.info("b_all_received = " + str(b_all_received))
         if b_all_received:
+            logging.info(f"[MODE_DEBUG] round={self.round_idx} mode={self.mode} "
+                         f"delta_T={self.args.delta_T} T_end={self.args.T_end} "
+                         f"comm_round={self.args.comm_round}")
+            self.aggregator.log_average_client_density(self.round_idx)
             global_model_params = self.aggregator.aggregate()
             logging.info(f"current mode for server is {self.mode}, the round is {self.round_idx}")
             if self.mode in [2, 3]:
+                logging.info(f"[SCHED_CHECK] density_scheduler={self.args.density_scheduler} type={type(self.args.density_scheduler)} "
+                             f"target_density={self.args.target_density} strategy={self.args.pruning_strategy}")
                 model = self.aggregator.trainer.model
+
+                # density scheduler: update layer_density_dict before pruning
+                if self.args.density_scheduler is not None:
+                    start_density = self.args.init_density if self.args.init_density is not None else self.args.target_density
+                    target_density = cubic_density_schedule(
+                        self.round_idx, self.args.density_scheduler[1],
+                        start_density, self.args.density_scheduler[0],
+                    )
+                    layer_density_strategy, _ = model.strategy.split("_")
+                    model.layer_density_dict = generate_layer_density_dict(
+                        model.layer_shape_dict, model.num_overall_elements,
+                        model.sparse_layer_set, target_density, layer_density_strategy,
+                    )
+                    logging.info(f"[DENSITY_SCHED] round={self.round_idx} target={target_density:.4f} "
+                                 f"dense_ratio={model.num_overall_elements:.0f} "
+                                 f"layer_densities={ {k: f'{v:.3f}' for k, v in model.layer_density_dict.items()} }")
+
                 global_mask = self.aggregator.aggregate_mask()
-                # # prune to reach density
-                layer_density_strategy, pruning_strategy = model.strategy.split("_")
-                new_global_mask = pruning(model, model.layer_density_dict, pruning_strategy, mask_dict=global_mask)
-                model.mask_dict = new_global_mask
+                # ── diagnostic: OR mask density ──
+                if global_mask:
+                    or_ones = sum((v != 0).sum().item() for v in global_mask.values())
+                    or_total = sum(v.numel() for v in global_mask.values())
+                    self.aggregator.diagnostics["or_masks"].append({
+                        "round": self.round_idx,
+                        "or_density": or_ones / max(or_total, 1),
+                        "n_clients": len([k for k in self.aggregator.mask_dict if k is not None]),
+                    })
+                # ─────────────────────────────────
+                # CDF lock mode: skip density reset, use aggregated mask as-is
+                if model.floor_layer_density_dict is not None:
+                    model.mask_dict = global_mask
+                    logging.info("[CDF_LOCK] skipping density reset, using aggregated mask")
+                else:
+                    # prune to reach density (always resets to init density — the up-swing of oscillation)
+                    layer_density_strategy, pruning_strategy = model.strategy.split("_")
+                    new_global_mask = pruning(model, model.layer_density_dict, pruning_strategy, mask_dict=global_mask)
+                    model.mask_dict = new_global_mask
+
+                # final mag_cdf refinement at T_end — freeze the mask from here
+                if model.floor_layer_density_dict is not None and self.round_idx >= self.args.T_end:
+                    logging.info(f"[FINAL_MASK] round={self.round_idx} mag_cdf final refinement p={self.args.gate_p}")
+                    model.general_cdf_prune(p=self.args.gate_p, adjustment_type="mag_cdf")
+                # model.mask_dict = global_mask
                 model.to(self.aggregator.device)
                 model.apply_mask()
-                
+
+            # ── diagnostic: server density before logging ──
+            server_d = self.aggregator.trainer.model.compute_gate_guided_density()
+            self.aggregator.diagnostics["server_densities"].append({
+                "round": self.round_idx,
+                "mode": self.mode,
+                "density": server_d,
+            })
+            # ────────────────────────────────────────────────
+            self.aggregator.log_sparsity_statistics(self.round_idx)
+
             # logging.info("mask_dict after pruning and growing = " +str(mask_dict))
             self.aggregator.test_on_server_for_all_clients(self.round_idx)
             
@@ -105,6 +161,16 @@ class FedDSTServerManager(ServerManager):
             self.mode = self.mode_convert()
 
             if self.round_idx == self.round_num + 1:
+                # write diagnostics JSON (server process)
+                out_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "../../../experiments/feddst/results")
+                os.makedirs(out_dir, exist_ok=True)
+                out_path = os.path.join(out_dir, f"density_debug_server.json")
+                self.aggregator.diagnostics["rank"] = 0
+                self.aggregator.diagnostics["config"]["rounds_total"] = self.round_num
+                self.aggregator.diagnostics["config"]["clients_per_round"] = self.args.client_num_per_round
+                with open(out_path, "w") as f:
+                    json.dump(self.aggregator.diagnostics, f, indent=2, default=str)
+                logging.info(f"[DIAGNOSTICS] server JSON written to {out_path}")
                 # post_complete_message_to_sweep_process(self.args)
                 self.finish()
                 print('here')
@@ -145,6 +211,7 @@ class FedDSTServerManager(ServerManager):
         message.add_params(MyMessage.MSG_ARG_KEY_CLIENT_INDEX, str(client_index))
         message.add_params(MyMessage.MSG_ARG_KEY_ROUND_IDX, round_idx)
         message.add_params(MyMessage.MSG_ARG_KEY_MODE_CODE, mode_code)
+        message.add_params(MyMessage.MSG_ARG_KEY_PRUNING_ACTIVE, self.args.pruning_active)
         self.send_message(message)
 
     def send_message_sync_model_to_client(self, receive_id, global_model_params, client_index, mode_code, round_idx, mask_dict=None):
@@ -155,4 +222,5 @@ class FedDSTServerManager(ServerManager):
         message.add_params(MyMessage.MSG_ARG_KEY_ROUND_IDX, round_idx)
         message.add_params(MyMessage.MSG_ARG_KEY_MODE_CODE, mode_code)
         message.add_params(MyMessage.MSG_ARG_KEY_MODEL_MASKS, mask_dict)
+        message.add_params(MyMessage.MSG_ARG_KEY_PRUNING_ACTIVE, self.args.pruning_active)
         self.send_message(message)

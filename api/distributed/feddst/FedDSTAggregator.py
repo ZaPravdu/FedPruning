@@ -17,7 +17,8 @@ class FedDSTAggregator(object):
         self.trainer = model_trainer
 
         self.args = args
-        self.train_global = train_global 
+        self.args.pruning_active = True  # server-managed flag: gate pruning+reg when density_cutoff active
+        self.train_global = train_global
         self.test_global = test_global
         self.val_global = self._generate_validation_set(self.args.num_eval)
         self.all_train_data_num = all_train_data_num
@@ -32,6 +33,26 @@ class FedDSTAggregator(object):
         self.mask_dict = dict()
         self.sample_num_dict = dict()
         self.flag_client_model_uploaded_dict = dict()
+        self.client_densities = dict()
+        self.diagnostics = {
+            "config": {
+                "init_density": getattr(args, "init_density", None),
+                "target_density": getattr(args, "target_density", None),
+                "gate_p": getattr(args, "gate_p", None),
+                "reg_mode": getattr(args, "reg_mode", None),
+                "reg_weight": getattr(args, "reg_weight", None),
+                "reg_adjust_only": getattr(args, "reg_adjust_only", False),
+                "local_refinement": getattr(args, "local_refinement", False),
+                "adjustment_type": getattr(args, "adjustment_type", ""),
+                "client_optimizer": getattr(args, "client_optimizer", ""),
+                "lr": getattr(args, "lr", None),
+                "delta_T": getattr(args, "delta_T", None),
+                "T_end": getattr(args, "T_end", None),
+                "comm_round": getattr(args, "comm_round", None),
+            },
+            "or_masks": [],
+            "server_densities": [],
+        }
         for idx in range(self.worker_num):
             self.flag_client_model_uploaded_dict[idx] = False
 
@@ -41,16 +62,41 @@ class FedDSTAggregator(object):
     def set_global_model_params(self, model_parameters):
         self.trainer.set_model_params(model_parameters)
 
-    def add_local_trained_result(self, index, model_params, sample_num):
+    def add_local_trained_result(self, index, model_params, sample_num, density):
         logging.info("add_model. index = %d" % index)
         self.model_dict[index] = model_params
         self.sample_num_dict[index] = sample_num
         self.flag_client_model_uploaded_dict[index] = True
+        self.client_densities[index] = density
 
     def add_local_trained_mask(self, index, mask):
         logging.info("add_mask. index = %d" % index)
         self.mask_dict[index] = mask
         self.flag_client_model_uploaded_dict[index] = True
+
+    def log_average_client_density(self, round_idx):
+        assert self.client_densities, "no client densities — client-to-server message propagation failed"
+        values = list(self.client_densities.values())
+        avg = sum(values) / len(values)
+        self.client_densities.clear()
+        wandb.log({"Density/ClientLocal_avg": avg, "round": round_idx})
+
+        # density_cutoff: halt pruning+reg when density drops below target
+        if getattr(self.args, "density_cutoff", False):
+            if avg < self.args.target_density:
+                self.args.pruning_active = False
+                logging.info(
+                    f"CDF pruning paused: avg density {avg:.4f} < target "
+                    f"{self.args.target_density:.4f}"
+                )
+            else:
+                self.args.pruning_active = True
+                logging.info(
+                    f"CDF pruning resumed: avg density {avg:.4f} >= target "
+                    f"{self.args.target_density:.4f}"
+                )
+        else:
+            self.args.pruning_active = True   # always active without density_cutoff
 
     def check_whether_all_receive(self):
         logging.debug("worker_num = {}".format(self.worker_num))
@@ -161,3 +207,40 @@ class FedDSTAggregator(object):
                 if key != "test_total":
                     wandb.log({f"Test/{key}": metrics[key], "round": round_idx})
             logging.info(metrics)
+
+    def log_sparsity_statistics(self, round_idx):
+        model = self.trainer.model
+        post_density = model.compute_gate_guided_density()
+        wandb.log({"Density/PostAggregation_server": post_density, "round": round_idx})
+
+        # VD statistics
+        if model.has_vd_convs():
+            vd_kl = model.compute_vd_regularization()
+            log_sigmas = torch.cat([
+                m.log_sigma2.flatten() for _, m in model.model.named_modules()
+                if hasattr(m, 'log_sigma2')
+            ])
+            W = torch.cat([
+                m.conv.weight.flatten() for _, m in model.model.named_modules()
+                if hasattr(m, 'log_sigma2')
+            ])
+            log_alphas = torch.cat([
+                m._clip(m.log_sigma2 - torch.log(m.conv.weight ** 2 + 1e-8)).flatten()
+                for _, m in model.model.named_modules()
+                if hasattr(m, 'log_sigma2')
+            ])
+            metrics = {
+                "VD/kl_loss": vd_kl.item() if vd_kl is not None else 0.0,
+                "VD/log_sigma2_mean": log_sigmas.mean().item(),
+                "VD/log_sigma2_min": log_sigmas.min().item(),
+                "VD/log_sigma2_max": log_sigmas.max().item(),
+                "VD/log_alpha_mean": log_alphas.mean().item(),
+                "VD/log_alpha_min": log_alphas.min().item(),
+                "VD/log_alpha_max": log_alphas.max().item(),
+                "round": round_idx,
+            }
+            # original mode: log effective density from VD eval pruning
+            if model.has_vd_original_mode():
+                metrics["Density/VD_effective"] = model.compute_vd_density()
+            wandb.log(metrics)
+
