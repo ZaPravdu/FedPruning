@@ -211,7 +211,6 @@ class FedDSTServerManager(ServerManager):
         message.add_params(MyMessage.MSG_ARG_KEY_CLIENT_INDEX, str(client_index))
         message.add_params(MyMessage.MSG_ARG_KEY_ROUND_IDX, round_idx)
         message.add_params(MyMessage.MSG_ARG_KEY_MODE_CODE, mode_code)
-        message.add_params(MyMessage.MSG_ARG_KEY_PRUNING_ACTIVE, self.args.pruning_active)
         self.send_message(message)
 
     def send_message_sync_model_to_client(self, receive_id, global_model_params, client_index, mode_code, round_idx, mask_dict=None):
@@ -222,5 +221,4 @@ class FedDSTServerManager(ServerManager):
         message.add_params(MyMessage.MSG_ARG_KEY_ROUND_IDX, round_idx)
         message.add_params(MyMessage.MSG_ARG_KEY_MODE_CODE, mode_code)
         message.add_params(MyMessage.MSG_ARG_KEY_MODEL_MASKS, mask_dict)
-        message.add_params(MyMessage.MSG_ARG_KEY_PRUNING_ACTIVE, self.args.pruning_active)
         self.send_message(message)

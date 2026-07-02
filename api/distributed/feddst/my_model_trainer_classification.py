@@ -109,17 +109,8 @@ class MyModelTrainer(ModelTrainer):
 
         # ── 预训练 CDF 剪枝 (替代 ClientManager.local_refinement，有数据可用梯度指标) ──
         adjust_type = getattr(args, "adjustment_type", "")
-        pruning_still_active = getattr(args, "pruning_active", True) is True
-        if getattr(args, "local_refinement", False) and mode in [0, 3] and pruning_still_active and adjust_type:
-            do_refine = True
-            if getattr(args, "density_cutoff", False):
-                cur_density, _ = model.stat_actual_density()
-                if cur_density <= args.target_density:
-                    logging.info(f"[LOCAL_REF] round={round_idx} SKIP "
-                                 f"(density {cur_density:.4f} <= {args.target_density})")
-                    do_refine = False
-            if do_refine:
-                # ── diagnostic: capture density + weight stats before CDF ──
+        if getattr(args, "local_refinement", False) and mode in [0, 3] and adjust_type:
+            # ── diagnostic: capture density + weight stats before CDF ──
                 pre_density, pre_layer = model.stat_actual_density()
                 # active weight statistics across all pruned layers
                 active_weights = []
@@ -176,7 +167,7 @@ class MyModelTrainer(ModelTrainer):
                 model.zero_grad()
                 log_probs = model(x)
                 loss = criterion(log_probs, labels)
-                if (not args.reg_adjust_only or mode in (2, 3)) and getattr(args, "pruning_active", True):
+                if not args.reg_adjust_only or mode in (2, 3):
                     loss_ce = loss.item()
                     loss = self._add_reg(args, loss)
                     l1_losses_epoch.append(loss.item() - loss_ce)
@@ -219,19 +210,15 @@ class MyModelTrainer(ModelTrainer):
                 gradients = {name: param.grad.data.cpu().clone() for name, param in model.named_parameters() if param.requires_grad}
                 model.zero_grad()
 
-            pruning_still_active = getattr(args, "pruning_active", True) is True
             # local refinement skips mode 2 prune/grow (already done on mask receipt)
             if getattr(args, "local_refinement", False):
                 pass
             elif model.has_gated_convs():
-                if pruning_still_active:
-                    model.prune_by_gate_cdf(p=args.gate_p)
+                model.prune_by_gate_cdf(p=args.gate_p)
             elif adjust_type == "mag_cdf":
-                if pruning_still_active:
-                    model.general_cdf_prune(p=args.gate_p, adjustment_type="mag_cdf")
+                model.general_cdf_prune(p=args.gate_p, adjustment_type="mag_cdf")
             elif adjust_type == "channel_l1_cdf":
-                if pruning_still_active:
-                    model.channel_l1_cdf_prune(p=args.gate_p)
+                model.channel_l1_cdf_prune(p=args.gate_p)
             else:
                 # original FedDST prune+grow maintains density
                 model.adjust_mask_dict(gradients, t=round_idx, T_end=args.T_end, alpha=args.adjust_alpha)
@@ -244,7 +231,7 @@ class MyModelTrainer(ModelTrainer):
                 model.zero_grad()
                 log_probs = model(x)
                 loss = criterion(log_probs, labels)
-                if not args.reg_adjust_only and getattr(args, "pruning_active", True):
+                if not args.reg_adjust_only:
                     loss_ce = loss.item()
                     loss = self._add_reg(args, loss)
                     l1_losses_epoch.append(loss.item() - loss_ce)

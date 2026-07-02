@@ -45,9 +45,6 @@ class FedDSTClientManager(ClientManager):
         self.mode = msg_params.get(MyMessage.MSG_ARG_KEY_MODE_CODE)
         self.round_idx =  msg_params.get(MyMessage.MSG_ARG_KEY_ROUND_IDX)
 
-        self.args.pruning_active = msg_params.msg_params.get(MyMessage.MSG_ARG_KEY_PRUNING_ACTIVE, True)
-        logging.info(f"Client init: received pruning_active={self.args.pruning_active}")
-
         if self.args.is_mobile == 1:
             global_model_params = transform_list_to_tensor(global_model_params)
 
@@ -62,9 +59,6 @@ class FedDSTClientManager(ClientManager):
         self.mode = msg_params.get(MyMessage.MSG_ARG_KEY_MODE_CODE)
         self.round_idx =  msg_params.get(MyMessage.MSG_ARG_KEY_ROUND_IDX)
 
-        self.args.pruning_active = msg_params.msg_params.get(MyMessage.MSG_ARG_KEY_PRUNING_ACTIVE, True)
-        logging.info(f"Client round {self.round_idx}: received pruning_active={self.args.pruning_active}")
-
         if self.args.is_mobile == 1:
             model_params = transform_list_to_tensor(model_params)
 
@@ -75,12 +69,6 @@ class FedDSTClientManager(ClientManager):
 
         self.trainer.update_model(model_params)
         self.trainer.update_dataset(int(client_index))
-
-        # local refinement 下移至 trainer（有数据），此处只保留密度日志
-        if self.mode in [0,3] and getattr(self.args, "local_refinement", False):
-            if getattr(self.args, "density_cutoff", False) and self._last_density <= self.args.target_density:
-                logging.info(f"[LOCAL_REF] round={self.round_idx} SKIP "
-                             f"(last_density={self._last_density:.4f} <= target={self.args.target_density})")
 
         self.__train()
         if self.round_idx == self.num_rounds:

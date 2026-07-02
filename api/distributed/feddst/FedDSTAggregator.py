@@ -17,7 +17,6 @@ class FedDSTAggregator(object):
         self.trainer = model_trainer
 
         self.args = args
-        self.args.pruning_active = True  # server-managed flag: gate pruning+reg when density_cutoff active
         self.train_global = train_global
         self.test_global = test_global
         self.val_global = self._generate_validation_set(self.args.num_eval)
@@ -80,23 +79,6 @@ class FedDSTAggregator(object):
         avg = sum(values) / len(values)
         self.client_densities.clear()
         wandb.log({"Density/ClientLocal_avg": avg, "round": round_idx})
-
-        # density_cutoff: halt pruning+reg when density drops below target
-        if getattr(self.args, "density_cutoff", False):
-            if avg < self.args.target_density:
-                self.args.pruning_active = False
-                logging.info(
-                    f"CDF pruning paused: avg density {avg:.4f} < target "
-                    f"{self.args.target_density:.4f}"
-                )
-            else:
-                self.args.pruning_active = True
-                logging.info(
-                    f"CDF pruning resumed: avg density {avg:.4f} >= target "
-                    f"{self.args.target_density:.4f}"
-                )
-        else:
-            self.args.pruning_active = True   # always active without density_cutoff
 
     def check_whether_all_receive(self):
         logging.debug("worker_num = {}".format(self.worker_num))

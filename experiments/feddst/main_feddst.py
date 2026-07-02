@@ -139,13 +139,6 @@ def add_args(parser):
     )
 
     parser.add_argument(
-        "--density_cutoff",
-        action="store_true",
-        default=False,
-        help="CDF compression strategy: 2x init density + halt pruning+reg when density < target",
-    )
-
-    parser.add_argument(
         "--reg_mode",
         type=str,
         default="none",

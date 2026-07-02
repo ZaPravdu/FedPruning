@@ -76,7 +76,7 @@ def magnitude_prune(weight, old_mask, num_elements, density):
         weight = weight * old_mask.to(weight.device) 
     
     num_remain = int(num_elements * density)
-    # assert old_mask.sum() >= num_remain
+    assert old_mask.sum() >= num_remain
 
     x, idx = torch.sort(torch.abs(weight.data.view(-1)), descending=True)
     new_mask = torch.zeros_like( old_mask, dtype=old_mask.data.dtype, requires_grad=False )
