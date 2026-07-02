@@ -133,10 +133,6 @@ class FedDSTServerManager(ServerManager):
                     new_global_mask = pruning(model, model.layer_density_dict, pruning_strategy, mask_dict=global_mask)
                     model.mask_dict = new_global_mask
 
-                # final mag_cdf refinement at T_end — freeze the mask from here
-                if model.floor_layer_density_dict is not None and self.round_idx >= self.args.T_end:
-                    logging.info(f"[FINAL_MASK] round={self.round_idx} mag_cdf final refinement p={self.args.gate_p}")
-                    model.general_cdf_prune(p=self.args.gate_p, adjustment_type="mag_cdf")
                 # model.mask_dict = global_mask
                 model.to(self.aggregator.device)
                 model.apply_mask()
