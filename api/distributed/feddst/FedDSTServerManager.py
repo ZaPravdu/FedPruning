@@ -146,6 +146,7 @@ class FedDSTServerManager(ServerManager):
             })
             # ────────────────────────────────────────────────
             self.aggregator.log_sparsity_statistics(self.round_idx)
+            self.aggregator.log_communication_cost(self.round_idx, self.args.client_num_per_round)
 
             # logging.info("mask_dict after pruning and growing = " +str(mask_dict))
             self.aggregator.test_on_server_for_all_clients(self.round_idx)

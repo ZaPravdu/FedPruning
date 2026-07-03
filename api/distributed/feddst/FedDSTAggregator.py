@@ -55,6 +55,8 @@ class FedDSTAggregator(object):
         for idx in range(self.worker_num):
             self.flag_client_model_uploaded_dict[idx] = False
 
+        self.comm_cumulative_cost = 0.0
+
     def get_global_model_params(self):
         return self.trainer.get_model_params()
 
@@ -77,8 +79,16 @@ class FedDSTAggregator(object):
         assert self.client_densities, "no client densities — client-to-server message propagation failed"
         values = list(self.client_densities.values())
         avg = sum(values) / len(values)
+        self.last_mean_client_density = avg
         self.client_densities.clear()
         wandb.log({"Density/ClientLocal_avg": avg, "round": round_idx})
+
+    def log_communication_cost(self, round_idx, num_clients):
+        server_density = self.trainer.model.compute_gate_guided_density()
+        mean_client_density = getattr(self, 'last_mean_client_density', 0.0)
+        round_cost = (server_density + mean_client_density) * num_clients
+        self.comm_cumulative_cost += round_cost
+        wandb.log({"Comm/CumulativeCost": self.comm_cumulative_cost, "round": round_idx})
 
     def check_whether_all_receive(self):
         logging.debug("worker_num = {}".format(self.worker_num))
