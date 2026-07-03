@@ -56,7 +56,7 @@ def add_args(parser):
     parser.add_argument("--reopen_gate_on_adjust", type=int, default=1, help="whether to reopen gated channels before adaptive epochs in adjustment rounds")
     parser.add_argument("--gate_reg_eps", type=float, default=1e-6, help="epsilon for numerical stability in gate-aware regularisation")
     parser.add_argument("--aggregate_gate", type=int, default=0, help="whether to log gate-guided sparsity statistics on server side")
-    parser.add_argument("--adjustment_type", type=str, default="", choices=["", "mag", "mag_cdf", "mag_grad_mag", "channel_l1_cdf"],
+    parser.add_argument("--adjustment_type", type=str, default=None, choices=["mag", "mag_cdf", "mag_grad_mag", "channel_l1_cdf"],
                         help="pruning strategy in adjustment rounds (default: original prune+grow). options: mag | mag_cdf | mag_grad_mag | channel_l1_cdf")
     parser.add_argument("--reg_mode", type=str, default="none",
                         choices=["none", "l1", "ns", "nard", "channel", "original",

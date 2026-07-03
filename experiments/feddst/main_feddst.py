@@ -133,9 +133,9 @@ def add_args(parser):
     parser.add_argument(
         "--adjustment_type",
         type=str,
-        default="",
-        choices=["", "mag", "mag_cdf", "mag_grad_mag", "channel_l1_cdf"],
-        help="pruning strategy in adjustment rounds (default: original prune+grow). options: mag | mag_cdf | mag_grad_mag | channel_l1_cdf",
+        default=None,
+        choices=["mag", "mag_cdf", "mag_grad_mag", "channel_l1_cdf"],
+        help="pruning strategy in adjustment rounds (default: None = original FedDST prune+grow). options: mag | mag_cdf | mag_grad_mag | channel_l1_cdf",
     )
 
     parser.add_argument(

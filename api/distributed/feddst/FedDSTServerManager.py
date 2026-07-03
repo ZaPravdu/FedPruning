@@ -124,7 +124,7 @@ class FedDSTServerManager(ServerManager):
                     })
                 # ─────────────────────────────────
                 # CDF lock mode: skip density reset, use aggregated mask as-is
-                if model.floor_layer_density_dict is not None:
+                if model.floor_layer_density_dict is not None and getattr(self.args, "adjustment_type", None) is not None:
                     model.mask_dict = global_mask
                     logging.info("[CDF_LOCK] skipping density reset, using aggregated mask")
                 else:

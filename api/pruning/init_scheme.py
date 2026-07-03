@@ -111,7 +111,7 @@ def compute_cdf_metric(weight, mask, adjustment_type="mag_cdf"):
     Raises:
         ValueError: on unknown adjustment_type
     """
-    if adjustment_type == "":
+    if adjustment_type is None:
         return None
 
     masked_w = weight.data * mask

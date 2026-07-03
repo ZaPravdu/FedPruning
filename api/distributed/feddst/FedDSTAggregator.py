@@ -42,7 +42,7 @@ class FedDSTAggregator(object):
                 "reg_weight": getattr(args, "reg_weight", None),
                 "reg_adjust_only": getattr(args, "reg_adjust_only", False),
                 "local_refinement": getattr(args, "local_refinement", False),
-                "adjustment_type": getattr(args, "adjustment_type", ""),
+                "adjustment_type": getattr(args, "adjustment_type", None),
                 "client_optimizer": getattr(args, "client_optimizer", ""),
                 "lr": getattr(args, "lr", None),
                 "delta_T": getattr(args, "delta_T", None),

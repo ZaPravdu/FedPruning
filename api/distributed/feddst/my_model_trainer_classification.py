@@ -25,7 +25,7 @@ class MyModelTrainer(ModelTrainer):
                 "reg_weight": getattr(args, "reg_weight", None),
                 "reg_adjust_only": getattr(args, "reg_adjust_only", False),
                 "local_refinement": getattr(args, "local_refinement", False),
-                "adjustment_type": getattr(args, "adjustment_type", ""),
+                "adjustment_type": getattr(args, "adjustment_type", None),
                 "client_optimizer": getattr(args, "client_optimizer", ""),
                 "lr": getattr(args, "lr", None),
             },
@@ -108,7 +108,7 @@ class MyModelTrainer(ModelTrainer):
                 model.reopen_gated_channels()
 
         # ── 预训练 CDF 剪枝 (替代 ClientManager.local_refinement，有数据可用梯度指标) ──
-        adjust_type = getattr(args, "adjustment_type", "")
+        adjust_type = getattr(args, "adjustment_type", None)
         if getattr(args, "local_refinement", False) and mode in [0, 3] and adjust_type:
             # ── diagnostic: capture density + weight stats before CDF ──
                 pre_density, pre_layer = model.stat_actual_density()
