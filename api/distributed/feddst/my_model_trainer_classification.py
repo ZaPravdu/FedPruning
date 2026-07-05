@@ -167,7 +167,7 @@ class MyModelTrainer(ModelTrainer):
                 model.zero_grad()
                 log_probs = model(x)
                 loss = criterion(log_probs, labels)
-                if round_idx >= 100 and (not args.reg_adjust_only or mode in (2, 3)):
+                if round_idx is not None and 50 <= round_idx <= args.T_end and (not args.reg_adjust_only or mode in (2, 3)):
                     loss_ce = loss.item()
                     loss = self._add_reg(args, loss)
                     l1_losses_epoch.append(loss.item() - loss_ce)
@@ -231,7 +231,7 @@ class MyModelTrainer(ModelTrainer):
                 model.zero_grad()
                 log_probs = model(x)
                 loss = criterion(log_probs, labels)
-                if round_idx >= 100 and not args.reg_adjust_only:
+                if round_idx is not None and 50 <= round_idx <= args.T_end and not args.reg_adjust_only:
                     loss_ce = loss.item()
                     loss = self._add_reg(args, loss)
                     l1_losses_epoch.append(loss.item() - loss_ce)
