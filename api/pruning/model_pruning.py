@@ -137,7 +137,7 @@ class SparseModel(nn.Module):
         return layer_set, layer_shape_dict, num_overall_elements
 
     def _stat_density_info(self):
-        layer_density_dict = 0
+        layer_density_dict = {}
         for name, weight in self.model.named_parameters():
             if name in self.mask_dict:
                 remains = self.mask_dict[name].sum().item()

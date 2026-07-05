@@ -131,7 +131,9 @@ class FedDSTAggregator(object):
         return averaged_params
 
     def aggregate_mask(self):
-        aggr_mask = self.mask_dict[0]
+        aggr_mask = {}
+        for k, v in self.mask_dict[0].items():
+            aggr_mask[k] = v.clone()
         for idx in range(1, self.worker_num):
             for k, v in self.mask_dict[idx].items():
                 aggr_mask[k] = torch.logical_or(aggr_mask[k].to(self.device),v.to(self.device)).float()
