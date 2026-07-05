@@ -52,7 +52,7 @@ def add_args(parser):
     parser.add_argument("--nlp_hidden_size", type=int, default=256, metavar="N", help="the hidden size for nlp model")
     parser.add_argument("--num_eval", type=int, default=128, help="the number of data samples used for eval")
     parser.add_argument('--lr', type=float, default=0.001, metavar='LR', help='learning rate')
-    parser.add_argument("--gate_p", type=float, default=0.85, help="keep channels until cumulative softmax gate mass reaches p")
+    parser.add_argument("--p", type=float, default=0.85, help="CDF top-p ratio for pruning (was --gate_p)")
     parser.add_argument("--reopen_gate_on_adjust", type=int, default=1, help="whether to reopen gated channels before adaptive epochs in adjustment rounds")
     parser.add_argument("--gate_reg_eps", type=float, default=1e-6, help="epsilon for numerical stability in gate-aware regularisation")
     parser.add_argument("--aggregate_gate", type=int, default=0, help="whether to log gate-guided sparsity statistics on server side")
@@ -312,7 +312,7 @@ def main():
             aggregated_mask = aggregator.aggregate_mask()
 
             layer_density_strategy, pruning_strategy = model.strategy.split("_")
-            new_global_mask = pruning(model, model.layer_density_dict, pruning_strategy, mask_dict=aggregated_mask)
+            new_global_mask = pruning(model, model.current_layer_density_dict, pruning_strategy, mask_dict=aggregated_mask)
             model.mask_dict = new_global_mask
             model.to(device)
             model.apply_mask()

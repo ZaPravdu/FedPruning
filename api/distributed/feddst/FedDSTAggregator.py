@@ -37,7 +37,7 @@ class FedDSTAggregator(object):
             "config": {
                 "init_density": getattr(args, "init_density", None),
                 "target_density": getattr(args, "target_density", None),
-                "gate_p": getattr(args, "gate_p", None),
+                "p": getattr(args, "p", None),
                 "reg_mode": getattr(args, "reg_mode", None),
                 "reg_weight": getattr(args, "reg_weight", None),
                 "reg_adjust_only": getattr(args, "reg_adjust_only", False),
@@ -136,6 +136,22 @@ class FedDSTAggregator(object):
             for k, v in self.mask_dict[idx].items():
                 aggr_mask[k] = torch.logical_or(aggr_mask[k].to(self.device),v.to(self.device)).float()
         return aggr_mask
+
+    def aggregate_mask_frequency(self):
+        """Count client vote frequency per parameter position across all uploaded masks.
+
+        Returns {name: freq_tensor} where each entry is a float tensor
+        in [0, num_clients] indicating how many clients kept that position.
+        """
+        num_clients = len(self.mask_dict)
+        freq_dict = {}
+        for k in self.mask_dict[0].keys():
+            freq = torch.zeros_like(self.mask_dict[0][k], dtype=torch.int)
+            for idx in range(num_clients):
+                if k in self.mask_dict[idx]:
+                    freq += self.mask_dict[idx][k].bool().int()
+            freq_dict[k] = freq.float()
+        return freq_dict
 
     def client_sampling(self, round_idx, client_num_in_total, client_num_per_round):
         if client_num_in_total == client_num_per_round:

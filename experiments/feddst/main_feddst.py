@@ -103,10 +103,17 @@ def add_args(parser):
     )
 
     parser.add_argument(
-        "--gate_p",
+        "--p",
         type=float,
         default=0.85,
-        help="keep channels until cumulative softmax gate mass reaches p",
+        help="CDF top-p ratio for pruning (was --gate_p)",
+    )
+
+    parser.add_argument(
+        "--top_p_aggregate",
+        action="store_true",
+        default=False,
+        help="server aggregates masks by vote frequency CDF top-p instead of OR + magnitude re-prune",
     )
 
     parser.add_argument(
@@ -426,11 +433,8 @@ if __name__ == "__main__":
     # Note if the model is DNN (e.g., ResNet), the training will be very slow.
     # In this case, please use our FedML distributed version (./experiments/distributed_fedprune)
     inner_model = create_model(args, model_name=args.model, output_dim=dataset[7])
-    # init_density overrides target_density for ERK initialization
-    # target_density is kept as floor_density for CDF lock
-    init_density = args.init_density if args.init_density is not None else args.target_density
-    model = SparseModel(inner_model, target_density=init_density,
-                        floor_density=args.target_density,
+    model = SparseModel(inner_model, target_density=args.target_density,
+                        init_density=args.init_density,
                         strategy=args.pruning_strategy)
 
     # start distributed training

@@ -5,7 +5,7 @@ import sys
 
 from .message_define import MyMessage
 from .utils import transform_tensor_to_list, post_complete_message_to_sweep_process
-from api.pruning.init_scheme import cubic_density_schedule, generate_layer_density_dict, pruning
+from api.pruning.init_scheme import cubic_density_schedule, generate_layer_density_dict, pruning, cdf_prune_by_metric
 import torch
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.getcwd(), "../../../")))
@@ -96,42 +96,62 @@ class FedDSTServerManager(ServerManager):
                              f"target_density={self.args.target_density} strategy={self.args.pruning_strategy}")
                 model = self.aggregator.trainer.model
 
-                # density scheduler: update layer_density_dict before pruning
+                # density scheduler: update current_density / current_layer_density_dict
                 if self.args.density_scheduler is not None:
                     start_density = self.args.init_density if self.args.init_density is not None else self.args.target_density
-                    target_density = cubic_density_schedule(
+                    new_current_density = cubic_density_schedule(
                         self.round_idx, self.args.density_scheduler[1],
                         start_density, self.args.density_scheduler[0],
                     )
                     layer_density_strategy, _ = model.strategy.split("_")
-                    model.layer_density_dict = generate_layer_density_dict(
+                    model.current_density = new_current_density
+                    model.current_layer_density_dict = generate_layer_density_dict(
                         model.layer_shape_dict, model.num_overall_elements,
-                        model.sparse_layer_set, target_density, layer_density_strategy,
+                        model.sparse_layer_set, new_current_density, layer_density_strategy,
                     )
-                    logging.info(f"[DENSITY_SCHED] round={self.round_idx} target={target_density:.4f} "
+                    logging.info(f"[DENSITY_SCHED] round={self.round_idx} target={new_current_density:.4f} "
                                  f"dense_ratio={model.num_overall_elements:.0f} "
-                                 f"layer_densities={ {k: f'{v:.3f}' for k, v in model.layer_density_dict.items()} }")
+                                 f"layer_densities={ {k: f'{v:.3f}' for k, v in model.current_layer_density_dict.items()} }")
 
-                global_mask = self.aggregator.aggregate_mask()
-                # ── diagnostic: OR mask density ──
-                if global_mask:
-                    or_ones = sum((v != 0).sum().item() for v in global_mask.values())
-                    or_total = sum(v.numel() for v in global_mask.values())
-                    self.aggregator.diagnostics["or_masks"].append({
-                        "round": self.round_idx,
-                        "or_density": or_ones / max(or_total, 1),
-                        "n_clients": len([k for k in self.aggregator.mask_dict if k is not None]),
-                    })
-                # ─────────────────────────────────
-                # CDF lock mode: skip density reset, use aggregated mask as-is
-                if model.floor_layer_density_dict is not None and getattr(self.args, "adjustment_type", None) is not None:
-                    model.mask_dict = global_mask
-                    logging.info("[CDF_LOCK] skipping density reset, using aggregated mask")
+                # ── top_p_aggregate: frequency-based CDF top p ──
+                if getattr(self.args, "top_p_aggregate", False):
+                    candidate = self.aggregator.aggregate_mask()
+                    freq_dict = self.aggregator.aggregate_mask_frequency()
+                    for k in candidate.keys():
+                        min_keep = None
+                        if k in model.layer_density_dict:
+                            min_keep = int(candidate[k].numel() * model.layer_density_dict[k])
+                        metric = freq_dict.get(k)
+                        if metric is not None:
+                            candidate[k] = cdf_prune_by_metric(
+                                metric, model.model.get_parameter(k),
+                                candidate[k], p=self.args.p, min_keep=min_keep,
+                            )
+                    model.mask_dict = candidate
+                    logging.info(f"[TOP_P_AGGREGATE] round={self.round_idx} p={self.args.p}")
+
                 else:
-                    # prune to reach density (always resets to init density — the up-swing of oscillation)
-                    layer_density_strategy, pruning_strategy = model.strategy.split("_")
-                    new_global_mask = pruning(model, model.layer_density_dict, pruning_strategy, mask_dict=global_mask)
-                    model.mask_dict = new_global_mask
+                    # ── original aggregation ──
+                    global_mask = self.aggregator.aggregate_mask()
+                    # ── diagnostic: OR mask density ──
+                    if global_mask:
+                        or_ones = sum((v != 0).sum().item() for v in global_mask.values())
+                        or_total = sum(v.numel() for v in global_mask.values())
+                        self.aggregator.diagnostics["or_masks"].append({
+                            "round": self.round_idx,
+                            "or_density": or_ones / max(or_total, 1),
+                            "n_clients": len([k for k in self.aggregator.mask_dict if k is not None]),
+                        })
+                    # ─────────────────────────────────
+                    # CDF lock mode: skip density reset, use aggregated mask as-is
+                    if model.layer_density_dict is not None and getattr(self.args, "adjustment_type", None) is not None:
+                        model.mask_dict = global_mask
+                        logging.info("[CDF_LOCK] skipping density reset, using aggregated mask")
+                    else:
+                        # prune to reach density (always resets to current density)
+                        layer_density_strategy, pruning_strategy = model.strategy.split("_")
+                        new_global_mask = pruning(model, model.current_layer_density_dict, pruning_strategy, mask_dict=global_mask)
+                        model.mask_dict = new_global_mask
 
                 # model.mask_dict = global_mask
                 model.to(self.aggregator.device)

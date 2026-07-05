@@ -20,7 +20,7 @@ class MyModelTrainer(ModelTrainer):
             "config": {
                 "init_density": getattr(args, "init_density", None),
                 "target_density": getattr(args, "target_density", None),
-                "gate_p": getattr(args, "gate_p", None),
+                "p": getattr(args, "p", None),
                 "reg_mode": getattr(args, "reg_mode", None),
                 "reg_weight": getattr(args, "reg_weight", None),
                 "reg_adjust_only": getattr(args, "reg_adjust_only", False),
@@ -143,7 +143,7 @@ class MyModelTrainer(ModelTrainer):
                 model.zero_grad()
                 loss = criterion(model(x), labels)
                 loss.backward()
-                model.general_cdf_prune(p=args.gate_p, adjustment_type=adjust_type)
+                model.general_cdf_prune(p=args.p, adjustment_type=adjust_type)
                 model.apply_mask()
 
                 # ── diagnostic: capture density after CDF ──
@@ -167,7 +167,7 @@ class MyModelTrainer(ModelTrainer):
                 model.zero_grad()
                 log_probs = model(x)
                 loss = criterion(log_probs, labels)
-                if not args.reg_adjust_only or mode in (2, 3):
+                if round_idx >= 100 and (not args.reg_adjust_only or mode in (2, 3)):
                     loss_ce = loss.item()
                     loss = self._add_reg(args, loss)
                     l1_losses_epoch.append(loss.item() - loss_ce)
@@ -214,11 +214,11 @@ class MyModelTrainer(ModelTrainer):
             if getattr(args, "local_refinement", False):
                 pass
             elif model.has_gated_convs():
-                model.prune_by_gate_cdf(p=args.gate_p)
+                model.prune_by_gate_cdf(p=args.p)
             elif adjust_type == "mag_cdf":
-                model.general_cdf_prune(p=args.gate_p, adjustment_type="mag_cdf")
+                model.general_cdf_prune(p=args.p, adjustment_type="mag_cdf")
             elif adjust_type == "channel_l1_cdf":
-                model.channel_l1_cdf_prune(p=args.gate_p)
+                model.channel_l1_cdf_prune(p=args.p)
             else:
                 # original FedDST prune+grow maintains density
                 model.adjust_mask_dict(gradients, t=round_idx, T_end=args.T_end, alpha=args.adjust_alpha)
@@ -231,7 +231,7 @@ class MyModelTrainer(ModelTrainer):
                 model.zero_grad()
                 log_probs = model(x)
                 loss = criterion(log_probs, labels)
-                if not args.reg_adjust_only:
+                if round_idx >= 100 and not args.reg_adjust_only:
                     loss_ce = loss.item()
                     loss = self._add_reg(args, loss)
                     l1_losses_epoch.append(loss.item() - loss_ce)

@@ -9,13 +9,12 @@ import re
 
 class SparseModel(nn.Module):
     def __init__(self, model,
-                 target_density:float=1.,
-                #  strategy:str="uniform_magnitude",
-                strategy:str="ERK_magnitude",
+                 target_density:float=0.5,
+                 strategy:str="ERK_magnitude",
                  mask_dict: dict = {},
                  ignore_layers:list[int, str, type]=[".*bias.*", ".*\.gate$", ".*\.log_sigma2$", nn.BatchNorm2d, ".*bn.*", nn.LayerNorm, ".*ln.*"],
                  device = None,
-                 floor_density = None,
+                 init_density = None,
                  ):
         super(SparseModel, self).__init__()
         # strategy is a str that [sparsity_distribution]_[pruning_strategy]
@@ -24,8 +23,7 @@ class SparseModel(nn.Module):
         self.model = model
         self.mask_dict = mask_dict
         self.strategy = strategy
-        self.target_density = target_density
-        self.floor_density = floor_density      # CDF lock floor (None = disabled)
+        self.target_density = target_density      # static ultimate target
         self.ignore_layers = ignore_layers
         self.device = device
 
@@ -40,29 +38,31 @@ class SparseModel(nn.Module):
         # layer_density_dict includes the layer-wise densities for sparse layer (not include ignored layers)
 
         if self.mask_dict:
-            self.layer_density_dict = self._stat_density_info()
             self.sparse_layer_set = set(self.mask_dict.keys())
             logging.debug("########### call mask dict here #########")
-            logging.info(f"The sparse layers are {self.layer_density_dict}")
         else:
             self.sparse_layer_set = self._determine_sparse_layers()
-            self.layer_density_dict, self.mask_dict = self._init_prune()
-            logging.info(f"The sparse layers are {self.layer_density_dict}")
 
-        # floor_layer_density_dict: ERK-distributed per-layer floor from floor_density
-        # Used by general_cdf_prune as min_keep to enforce the CDF lock.
-        # Only computed when floor_density differs from target_density.
-        self.floor_layer_density_dict = None
-        if self.floor_density is not None:
-            if self.floor_density == self.target_density:
-                self.floor_layer_density_dict = self.layer_density_dict
-            else:
-                layer_strat, _ = self.strategy.split("_")
-                self.floor_layer_density_dict = generate_layer_density_dict(
-                    self.layer_shape_dict, self.num_overall_elements,
-                    self.sparse_layer_set, self.floor_density, layer_strat,
-                )
+        layer_strat, pruning_strat = self.strategy.split("_")
 
+        # Static floor: ERK from target_density (NEVER changes)
+        self.layer_density_dict = generate_layer_density_dict(
+            self.layer_shape_dict, self.num_overall_elements,
+            self.sparse_layer_set, self.target_density, layer_strat,
+        )
+
+        # Dynamic density: for pruning / scheduling
+        self.current_density = init_density if init_density is not None else self.target_density
+        self.current_layer_density_dict = generate_layer_density_dict(
+            self.layer_shape_dict, self.num_overall_elements,
+            self.sparse_layer_set, self.current_density, layer_strat,
+        )
+
+        # Initialize masks from current_density (if not from checkpoint)
+        if not self.mask_dict:
+            self.mask_dict = pruning(self.model, self.current_layer_density_dict, pruning_strat)
+
+        logging.info(f"Sparse layers (floor): {self.layer_density_dict}")
 
     def to(self, device, *args, **kwargs):
         self.device = device
@@ -147,9 +147,14 @@ class SparseModel(nn.Module):
         return  layer_density_dict
 
 
-    def _init_prune(self, **kwargs):
+    def _init_prune(self, density=None):
         layer_density_strategy, pruning_strategy = self.strategy.split("_")
-        layer_density_dict = generate_layer_density_dict(self.layer_shape_dict, self.num_overall_elements,self.sparse_layer_set, self.target_density, layer_density_strategy)
+        if density is None:
+            density = self.target_density
+        layer_density_dict = generate_layer_density_dict(
+            self.layer_shape_dict, self.num_overall_elements,
+            self.sparse_layer_set, density, layer_density_strategy,
+        )
         model_mask = pruning(self.model, layer_density_dict, pruning_strategy)
         return layer_density_dict, model_mask
 
@@ -415,8 +420,8 @@ class SparseModel(nn.Module):
         cdf_prune_by_metric to retain the active elements covering
         fraction p of total metric sum.
 
-        If floor_layer_density_dict is set, each layer keeps at least
-        floor_density × num_elements elements (CDF lock).
+        If layer_density_dict (from target_density) is set, each layer keeps at least
+        target_density × num_elements elements (CDF lock).
 
         Metric type (e.g. "mag", "magnitude") is controlled by
         adjustment_type — extend compute_cdf_metric() to add new ones.
@@ -440,10 +445,10 @@ class SparseModel(nn.Module):
             if active_num == 0:
                 continue
 
-            # floor lock: at least floor_density × num_elements per layer
+            # floor lock: at least target_density × num_elements per layer
             min_keep = None
-            if self.floor_layer_density_dict and name in self.floor_layer_density_dict:
-                min_keep = int(weight.numel() * self.floor_layer_density_dict[name])
+            if self.layer_density_dict and name in self.layer_density_dict:
+                min_keep = int(weight.numel() * self.layer_density_dict[name])
 
             metric = compute_cdf_metric(weight, mask, adjustment_type)
             new_mask = cdf_prune_by_metric(metric, weight, mask, p, min_keep=min_keep)
@@ -638,7 +643,7 @@ class SparseModel(nn.Module):
     def prune_mask_dict(self, t, T_end, alpha):
         self.mask_dict = sparse_pruning_step(self.model, self.mask_dict, t, T_end, alpha)
     def grow_mask_dict(self, gradients):
-        self.mask_dict = sparse_growing_step(self.model, gradients, self.mask_dict, self.layer_density_dict)
+        self.mask_dict = sparse_growing_step(self.model, gradients, self.mask_dict, self.current_layer_density_dict)
 if __name__ == "__main__":
     from torchvision.models import resnet18
     model = resnet18()
