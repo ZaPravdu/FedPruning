@@ -151,7 +151,7 @@ class FedDSTAggregator(object):
             freq = torch.zeros_like(self.mask_dict[0][k], dtype=torch.int)
             for idx in range(num_clients):
                 if k in self.mask_dict[idx]:
-                    freq += self.mask_dict[idx][k].bool().int()
+                    freq += self.mask_dict[idx][k].bool().int().to(freq.device)
             freq_dict[k] = freq.float()
         return freq_dict
 
