@@ -143,12 +143,13 @@ class FedDSTAggregator(object):
         """Count client vote frequency per parameter position across all uploaded masks.
 
         Returns {name: freq_tensor} where each entry is a float tensor
-        in [0, num_clients] indicating how many clients kept that position.
+        on self.device in [0, num_clients] indicating how many clients kept
+        that position.
         """
         num_clients = len(self.mask_dict)
         freq_dict = {}
         for k in self.mask_dict[0].keys():
-            freq = torch.zeros_like(self.mask_dict[0][k], dtype=torch.int)
+            freq = torch.zeros(self.mask_dict[0][k].shape, dtype=torch.int, device=self.device)
             for idx in range(num_clients):
                 if k in self.mask_dict[idx]:
                     freq += self.mask_dict[idx][k].bool().int().to(freq.device)
