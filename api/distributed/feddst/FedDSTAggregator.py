@@ -176,7 +176,7 @@ class FedDSTAggregator(object):
         else:
             return self.test_global
 
-    def test_on_server_for_all_clients(self, round_idx):
+    def test_on_server_for_all_clients(self, round_idx, **kwargs):
         # if self.trainer.test_on_the_server(self.train_data_local_dict, self.test_data_local_dict, self.device, self.args):
         #     return
 
@@ -210,10 +210,10 @@ class FedDSTAggregator(object):
 
             # last seven testing should be tested with full testing dataset
             if round_idx >= self.args.comm_round - 10 or self.args.num_eval == -1 :
-                metrics = self.trainer.test(self.test_global, self.device, self.args)
+                metrics = self.trainer.test(self.test_global, self.device, self.args, **kwargs)
             else:
-                metrics = self.trainer.test(self.val_global, self.device, self.args)
-                
+                metrics = self.trainer.test(self.val_global, self.device, self.args, **kwargs)
+
             for key in metrics:
                 if key != "test_total":
                     wandb.log({f"Test/{key}": metrics[key], "round": round_idx})

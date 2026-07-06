@@ -257,7 +257,7 @@ class MyModelTrainer(ModelTrainer):
 
         return model.mask_dict
 
-    def test(self, test_data, device, args):
+    def test(self, test_data, device, args, **kwargs):
         model = self.model
 
         model.to(device)
@@ -275,7 +275,7 @@ class MyModelTrainer(ModelTrainer):
             for batch_idx, (x, target) in enumerate(test_data):
                 x = x.to(device)
                 target = target.to(device)
-                pred = model(x)
+                pred = model(x, **kwargs)
                 loss = criterion(pred, target)
 
                 _, predicted = torch.max(pred, -1)

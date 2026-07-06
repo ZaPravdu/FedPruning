@@ -106,7 +106,7 @@ class MyModelTrainer(ModelTrainer):
 
         return model.mask_dict
 
-    def test(self, test_data, device, args):
+    def test(self, test_data, device, args, **kwargs):
         model = self.model
 
         model.to(device)
@@ -124,7 +124,7 @@ class MyModelTrainer(ModelTrainer):
             for batch_idx, batch in enumerate(test_data):
                 tokenized = self.tokenizer(batch['text'], padding=True, return_tensors='pt', max_length = 256, truncation = True)['input_ids'].to(device)
                 labels = tokenized[..., 1:].cpu()
-                logits, loss = model(tokenized, tokenized)
+                logits, loss = model(tokenized, tokenized, **kwargs)
                 pred_ids = torch.argmax(logits, dim=-1)[..., :-1].cpu()
                 
                 pad_token_id = self.tokenizer.encode(self.tokenizer.pad_token)[0]
