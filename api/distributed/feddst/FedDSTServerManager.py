@@ -159,7 +159,10 @@ class FedDSTServerManager(ServerManager):
 
                 # model.mask_dict = global_mask
                 model.to(self.aggregator.device)
-                model.apply_mask()
+                if not getattr(self.args, "mask_for_comm", False):
+                    model.apply_mask()
+                else:
+                    logging.info("[MASK_FOR_COMM] skipping server apply_mask — weights kept dense for inference")
 
             # ── diagnostic: server density before logging ──
             server_d = self.aggregator.trainer.model.compute_gate_guided_density()
