@@ -400,13 +400,13 @@ if __name__ == "__main__":
 
     # initialize the wandb machine learning experimental tracking platform (https://www.wandb.com/).
     if process_id == 0:
+        method_name = "FedCDP" if getattr(args, "top_p_aggregate", False) else "FedDST"
+        run_name = method_name + "_" + args.dataset + "_" + args.model
+        if getattr(args, "top_p_aggregate", False):
+            run_name += "_p" + str(args.p)
         wandb.init(
             project="FedPruning",
-            name="FedDST_"
-            + args.dataset 
-            + "_"
-            + args.model 
-            ,
+            name=run_name,
             config=args,
         )
 
