@@ -60,9 +60,9 @@ def main():
     ap.add_argument('--batch_size', type=int, default=128)
     ap.add_argument('--lr', type=float, default=0.1)
     ap.add_argument('--device', default='cuda')
-    ap.add_argument('--num_bins', type=int, default=200)
+    ap.add_argument('--num_bins', type=int, default=200, help='点数（分布图分箱数 / 质量曲线采样数）')
     ap.add_argument('--seed', type=int, default=42)
-    ap.add_argument('--p', type=float, default=0.1, help='retention threshold annotated on CDF')
+    ap.add_argument('--p', type=float, default=0.99, help='保留的质量比例（默认0.99=保留99%的权重总幅值）')
     args = ap.parse_args()
     np.random.seed(args.seed); torch.manual_seed(args.seed)
 
@@ -77,23 +77,21 @@ def main():
     optimizer = optim.SGD(model.parameters(), lr=args.lr, momentum=0.9, weight_decay=5e-4)
     scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=args.epochs)
 
-    # Warm-up: forward one batch so modules are initialized (BatchNorm stats etc.)
     model.eval()
     with torch.no_grad(): model(next(iter(train_loader))[0].to(args.device))
 
-    # Identify Conv/Linear layers
     layers = sorted([n for n, m in model.named_modules() if isinstance(m, (nn.Conv2d, nn.Linear))])
     print(f'Tracking {len(layers)} layers')
 
     NB = args.num_bins
-    # data[name][metric] = {'bins': [centers_ep0, ...], 'hist': [counts_ep0, ...], 'cdf': [retention_ep0, ...]}
-    data = {n: {mk: {'bins':[], 'hist':[], 'cdf':[]} for mk in ('mag','mag_grad')} for n in layers}
-    mm   = {n: {mk: {'min':np.inf,'max':-np.inf} for mk in ('mag','mag_grad')} for n in layers}  # global min/max
+    data = {n: {mk: {'bins':[], 'hist':[], 'mass':[]} for mk in ('mag','mag_grad')} for n in layers}
+    mm = {n: {mk: {'min':np.inf,'max':-np.inf} for mk in ('mag','mag_grad')} for n in layers}
 
-    # ----- Training -----
+    # Common x-axis for the mass retention curve: fraction of weights kept (0 → 1)
+    mass_x = np.linspace(0, 1, NB)
+
     best_acc = 0.0
     for epoch in range(args.epochs):
-        # Train
         model.train()
         running_loss = 0.0
         for x, y in train_loader:
@@ -105,23 +103,24 @@ def main():
             running_loss += loss.item()
         scheduler.step()
 
-        # Record scores (forward+backward on one batch → captures current weights & gradients)
         scores = record_scores(model, train_loader, criterion, args.device)
         for n in layers:
             for mk in ('mag', 'mag_grad'):
                 arr = scores[n][mk]
-                # Track global min/max
+                # Global min/max (for histogram common grid)
                 mm[n][mk]['min'] = min(mm[n][mk]['min'], float(arr.min()))
                 mm[n][mk]['max'] = max(mm[n][mk]['max'], float(arr.max()))
-                # Per-epoch histogram & CDF with adaptive bins
+                # Histogram with adaptive bins
                 bins = np.linspace(arr.min(), arr.max(), NB + 1)
                 ctr = (bins[:-1] + bins[1:]) / 2
                 h, _ = np.histogram(arr, bins=bins)
-                sorted_s = np.sort(arr)
-                retention = 1 - np.searchsorted(sorted_s, ctr, side='right') / len(sorted_s)
                 data[n][mk]['bins'].append(ctr)
                 data[n][mk]['hist'].append(h)
-                data[n][mk]['cdf'].append(retention)
+                # Mass retention curve: sort desc → cumsum → normalize → resample to [0,1]
+                sorted_desc = np.sort(arr)[::-1]
+                cum = np.cumsum(sorted_desc) / np.sum(sorted_desc)
+                x_orig = np.arange(1, len(arr) + 1) / len(arr)
+                data[n][mk]['mass'].append(np.interp(mass_x, x_orig, cum, left=0))
 
         # Evaluate
         model.eval()
@@ -136,74 +135,68 @@ def main():
 
     print(f'Best test accuracy: {best_acc:.2f}%')
 
-    # ----- Post-process: interpolate all epochs to a common grid per layer per metric -----
-    hist_surf, cdf_surf, centers_surf = {}, {}, {}
+    # ----- Post-process: interpolate histograms to global grid; mass curves already aligned -----
+    hist_surf, mass_surf, centers_surf = {}, {}, {}
     for n in layers:
-        hist_surf[n] = {}; cdf_surf[n] = {}; centers_surf[n] = {}
+        hist_surf[n] = {}; mass_surf[n] = {}; centers_surf[n] = {}
         for mk in ('mag', 'mag_grad'):
             gmin, gmax = mm[n][mk]['min'], mm[n][mk]['max']
             if gmax - gmin < 1e-12: gmax = gmin + 1e-6
-            gbins = np.linspace(gmin, gmax, NB)  # common grid
-            hgrid, cgrid = [], []
-            for e in range(args.epochs):
-                ep_ctr = data[n][mk]['bins'][e]
-                # Interpolate histogram (counts → counts on global grid; 0 outside epoch's range)
-                hgrid.append(np.interp(gbins, ep_ctr, data[n][mk]['hist'][e], left=0, right=0))
-                # Interpolate retention (1 outside below epoch min, 0 above epoch max)
-                cgrid.append(np.interp(gbins, ep_ctr, data[n][mk]['cdf'][e], left=1, right=0))
-            hist_surf[n][mk] = np.array(hgrid)  # (epochs, NB)
-            cdf_surf[n][mk]  = np.array(cgrid)
+            gbins = np.linspace(gmin, gmax, NB)
+            hgrid = [np.interp(gbins, d['bins'][e], d['hist'][e], left=0, right=0)
+                     for e, d in enumerate(data[n][mk])]
+            hist_surf[n][mk] = np.array(hgrid)
+            mass_surf[n][mk]  = np.array(data[n][mk]['mass'])  # (epochs, NB), already aligned
             centers_surf[n][mk] = gbins
 
     # ----- Build Plotly figures -----
     epochs_arr = np.arange(args.epochs)
-    traces_dist, traces_cdf = [], []
+    traces_dist, traces_mass = [], []
+
     for li, n in enumerate(layers):
         for mk in ('mag', 'mag_grad'):
             label = '|W|' if mk == 'mag' else '|W|·|∇W|'
-            cs = 'Blues' if mk == 'mag' else 'Reds'
-            vis = li == 0
+            cs, vis = ('Blues' if mk == 'mag' else 'Reds'), (li == 0)
             traces_dist.append(go.Surface(
                 x=centers_surf[n][mk], y=epochs_arr, z=hist_surf[n][mk],
                 name=label, visible=vis, colorscale=cs, opacity=0.85,
                 hovertemplate=f'Epoch:%{{y}}<br>Score:%{{x:.4f}}<br>Freq:%{{z:.0f}}<br>{label}<extra></extra>'))
-            traces_cdf.append(go.Surface(
-                x=centers_surf[n][mk], y=epochs_arr, z=cdf_surf[n][mk],
+            traces_mass.append(go.Surface(
+                x=mass_x, y=epochs_arr, z=mass_surf[n][mk],
                 name=label, visible=vis, colorscale=cs, opacity=0.85,
-                hovertemplate=f'Epoch:%{{y}}<br>Threshold:%{{x:.4f}}<br>Retention:%{{z:.3f}}<br>{label}<extra></extra>'))
+                hovertemplate=f'Keep %weights:%{{x:.1%}}<br>Epoch:%{{y}}<br>Mass retained:%{{z:.4f}}<br>{label}<extra></extra>'))
 
     def make_buttons(n_layers):
         return [dict(buttons=[
             dict(label=layers[i], method='restyle',
-                 args=[{'visible': [False]* (2*i) + [True,True] + [False]*(2*(n_layers-1-i))}])
+                 args=[{'visible': [False]*(2*i) + [True,True] + [False]*(2*(n_layers-1-i))}])
             for i in range(n_layers)], direction='down', showactive=True, x=0.1, y=1.15)]
 
     fig_dist = go.Figure(data=traces_dist)
-    fig_dist.update_layout(title='Score Distribution (3D Surface)',
+    fig_dist.update_layout(title='Score Distribution (3D)',
         scene=dict(xaxis_title='Score', yaxis_title='Epoch', zaxis_title='Frequency'),
         updatemenus=make_buttons(len(layers)), height=600)
 
-    fig_cdf = go.Figure(data=traces_cdf)
-    # z=p plane annotation
-    for li, n in enumerate(layers):
-        if li > 0: continue
-        xx, yy = np.meshgrid(centers_surf[n]['mag'], [0, args.epochs - 1])
-        fig_cdf.add_trace(go.Surface(
-            x=xx[0], y=yy[:,0], z=np.full_like(xx, args.p),
-            name=f'p={args.p}', colorscale='Greens', opacity=0.25, showscale=False,
-            hovertemplate=f'Threshold:%{{x:.4f}}<br>Epoch:%{{y}}<br>Retention(p={args.p})<extra></extra>'))
-        break
-    fig_cdf.update_layout(title=f'Retention (1 − CDF), annotated p={args.p}',
-        scene=dict(xaxis_title='Score Threshold', yaxis_title='Epoch', zaxis_title='Retention'),
+    fig_mass = go.Figure(data=traces_mass)
+    # z=p plane: mass fraction threshold
+    xx, yy = np.meshgrid(mass_x, [0, args.epochs - 1])
+    fig_mass.add_trace(go.Surface(
+        x=mass_x, y=yy[:,0], z=np.full_like(xx, args.p),
+        name=f'p={args.p}', colorscale='Greens', opacity=0.25, showscale=False,
+        hovertemplate=f'Keep %weights:%{{x:.1%}}<br>Epoch:%{{y}}<br>Mass retained(p={args.p})<extra></extra>'))
+    fig_mass.update_layout(
+        title=f'Magnitude Mass Retention — what % of weights capture {args.p:.0%} of total magnitude?',
+        scene=dict(xaxis_title='% weights kept (sorted by score ↓)', yaxis_title='Epoch',
+                   zaxis_title='% total magnitude mass retained'),
         updatemenus=make_buttons(len(layers)), height=600)
 
-    # ----- Combine into one self-contained HTML (plotly.js embedded, no CDN needed) -----
+    # ----- Combine into one self-contained HTML -----
     html = '<html><head><meta charset="utf-8"></head><body>'
-    html += '<h2>ResNet18 Score Distribution &amp; Retention</h2>'
-    html += f'<p>Dataset: {args.dataset} | Epochs: {args.epochs} | Best Acc: {best_acc:.2f}% | p: {args.p}</p>'
+    html += '<h2>ResNet18 Score Distribution &amp; Mass Retention</h2>'
+    html += f'<p>Dataset: {args.dataset} | Epochs: {args.epochs} | Best Acc: {best_acc:.2f}% | p={args.p}</p>'
     html += fig_dist.to_html(full_html=False, include_plotlyjs=True)
     html += '<hr>'
-    html += fig_cdf.to_html(full_html=False, include_plotlyjs=False)
+    html += fig_mass.to_html(full_html=False, include_plotlyjs=False)
     html += '</body></html>'
 
     out = f'vis_{args.dataset}.html'
