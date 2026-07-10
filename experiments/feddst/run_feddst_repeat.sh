@@ -8,7 +8,7 @@
 #   MODEL~LR   same positional args as run_feddst_distributed_pytorch.sh
 #   extra args appended verbatim (e.g. --top_p_aggregate --p 0.98)
 #
-# Each run gets --seed 0, 1, 2, … N-1.
+# Each run gets a random seed (1-32767).
 
 set -e
 
@@ -37,7 +37,7 @@ echo "Processes: $PROCESS_NUM"
 hostname > mpi_host_file
 
 for i in $(seq 1 "$REPEAT"); do
-    SEED=$((i - 1))
+    SEED=$((RANDOM % 90000 + 1))
     echo ""
     echo "============================================"
     echo "  Run $i / $REPEAT    (seed=$SEED)"
