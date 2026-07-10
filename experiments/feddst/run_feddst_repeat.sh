@@ -37,7 +37,7 @@ echo "Processes: $PROCESS_NUM"
 hostname > mpi_host_file
 
 for i in $(seq 1 "$REPEAT"); do
-    SEED=$((RANDOM % 90000 + 1))
+    SEED=$((i - 1))
     echo ""
     echo "============================================"
     echo "  Run $i / $REPEAT    (seed=$SEED)"
