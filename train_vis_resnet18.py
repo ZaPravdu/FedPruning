@@ -173,10 +173,10 @@ def main():
                 hovertemplate=f'Epoch:%{{y}}<br>Threshold:%{{x:.4f}}<br>Retention:%{{z:.3f}}<br>{label}<extra></extra>'))
 
     def make_buttons(n_layers):
-        return [[dict(buttons=[
+        return [dict(buttons=[
             dict(label=layers[i], method='restyle',
                  args=[{'visible': [False]* (2*i) + [True,True] + [False]*(2*(n_layers-1-i))}])
-            for i in range(n_layers)], direction='down', showactive=True, x=0.1, y=1.15)]]
+            for i in range(n_layers)], direction='down', showactive=True, x=0.1, y=1.15)]
 
     fig_dist = go.Figure(data=traces_dist)
     fig_dist.update_layout(title='Score Distribution (3D Surface)',
