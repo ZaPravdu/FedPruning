@@ -143,8 +143,8 @@ def main():
             gmin, gmax = mm[n][mk]['min'], mm[n][mk]['max']
             if gmax - gmin < 1e-12: gmax = gmin + 1e-6
             gbins = np.linspace(gmin, gmax, NB)
-            hgrid = [np.interp(gbins, d['bins'][e], d['hist'][e], left=0, right=0)
-                     for e, d in enumerate(data[n][mk])]
+            hgrid = [np.interp(gbins, data[n][mk]['bins'][e], data[n][mk]['hist'][e], left=0, right=0)
+                     for e in range(args.epochs)]
             hist_surf[n][mk] = np.array(hgrid)
             mass_surf[n][mk]  = np.array(data[n][mk]['mass'])  # (epochs, NB), already aligned
             centers_surf[n][mk] = gbins
@@ -163,7 +163,8 @@ def main():
                 hovertemplate=f'Epoch:%{{y}}<br>Score:%{{x:.4f}}<br>Freq:%{{z:.0f}}<br>{label}<extra></extra>'))
             traces_mass.append(go.Surface(
                 x=mass_x, y=epochs_arr, z=mass_surf[n][mk],
-                name=label, visible=vis, colorscale=cs, opacity=0.85,
+                name=label, visible=vis, colorscale=cs,
+                opacity=(0.9 if mk == 'mag' else 0.55),  # mag_grad more transparent so both visible
                 hovertemplate=f'Keep %weights:%{{x:.1%}}<br>Epoch:%{{y}}<br>Mass retained:%{{z:.4f}}<br>{label}<extra></extra>'))
 
     def make_buttons(n_layers):
