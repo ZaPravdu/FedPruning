@@ -197,11 +197,11 @@ def main():
         scene=dict(xaxis_title='Score Threshold', yaxis_title='Epoch', zaxis_title='Retention'),
         updatemenus=make_buttons(len(layers)), height=600)
 
-    # ----- Combine into one HTML -----
-    html = '<html><head><script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script></head><body>'
+    # ----- Combine into one self-contained HTML (plotly.js embedded, no CDN needed) -----
+    html = '<html><head><meta charset="utf-8"></head><body>'
     html += '<h2>ResNet18 Score Distribution &amp; Retention</h2>'
     html += f'<p>Dataset: {args.dataset} | Epochs: {args.epochs} | Best Acc: {best_acc:.2f}% | p: {args.p}</p>'
-    html += fig_dist.to_html(full_html=False, include_plotlyjs=False)
+    html += fig_dist.to_html(full_html=False, include_plotlyjs=True)
     html += '<hr>'
     html += fig_cdf.to_html(full_html=False, include_plotlyjs=False)
     html += '</body></html>'
