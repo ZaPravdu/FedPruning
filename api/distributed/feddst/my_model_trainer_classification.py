@@ -255,6 +255,11 @@ class MyModelTrainer(ModelTrainer):
             round_entry["l1_loss_count"] = len(l1_losses_epoch)
         # ──────────────────────────────────────────────────────
 
+        # ── weight_archive: record trained positions after local round ──
+        if getattr(args, "weight_archive", False) and self.model.weight_archive is not None:
+            self.model.update_weight_archive(self.model.mask_dict)
+        # ───────────────────────────────────────────────────────────────
+
         return model.mask_dict
 
     def test(self, test_data, device, args, **kwargs):

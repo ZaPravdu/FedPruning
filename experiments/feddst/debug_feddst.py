@@ -69,6 +69,8 @@ def add_args(parser):
                         help="unified coefficient for the active regularization (0=disabled)")
     parser.add_argument("--local_refinement", type=bool, default=False,
                         help="client prunes mask on receive from server, skips prune/grow in mode 2")
+    parser.add_argument("--weight_archive", action="store_true", default=False,
+                        help="maintain dense weight archive for mag_grad_mag metric")
     parser.add_argument("--reg_adjust_only", action="store_true", default=True,
                         help="only compute regularization in adjustment rounds (mode 2/3)")
     parser.add_argument("--vd_ard_init", type=float, default=-10.0,

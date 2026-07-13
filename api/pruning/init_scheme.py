@@ -96,7 +96,7 @@ def random_prune(old_mask, num_elements, density):
     return new_mask
 
 
-def compute_cdf_metric(weight, mask, adjustment_type="mag_cdf"):
+def compute_cdf_metric(weight, mask, adjustment_type="mag_cdf", archive_weight=None):
     """Compute importance metric matrix for CDF pruning.
 
     Returns a metric tensor of the same shape as weight,
@@ -106,6 +106,9 @@ def compute_cdf_metric(weight, mask, adjustment_type="mag_cdf"):
         weight: weight tensor
         mask: binary mask tensor
         adjustment_type: metric type ("mag_cdf", "magnitude", etc.)
+        archive_weight: optional dense weight tensor from weight_archive;
+            used as magnitude source for mag_grad_mag so pruned positions
+            retain non-zero metric values
     Returns:
         metric: importance metric tensor (same shape as weight)
     Raises:
@@ -121,7 +124,8 @@ def compute_cdf_metric(weight, mask, adjustment_type="mag_cdf"):
         if weight.grad is None:
             raise RuntimeError(f"mag_grad_mag: grad is None for {weight.shape}, "
                                "call backward() before pruning")
-        return (weight.grad.abs() * masked_w.abs()) * mask
+        mag_src = archive_weight if archive_weight is not None else weight.data
+        return (weight.grad.abs() * mag_src.abs()) * mask
     else:
         raise ValueError(f"Unknown CDF metric adjustment_type: {adjustment_type}")
 

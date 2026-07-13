@@ -97,6 +97,14 @@ def add_args(parser):
     )
 
     parser.add_argument(
+        "--weight_archive",
+        action="store_true",
+        default=False,
+        help="maintain a dense weight archive on client for mag_grad_mag metric; "
+             "uses unpruned weight magnitudes so pruned positions retain non-zero metric values",
+    )
+
+    parser.add_argument(
         "--reg_adjust_only",
         action="store_true",
         help="only compute regularization in adjustment rounds (mode 2/3)",
@@ -404,6 +412,8 @@ if __name__ == "__main__":
         run_name = method_name + "_" + args.dataset + "_" + args.model
         if getattr(args, "top_p_aggregate", False):
             run_name += "_p" + str(args.p)
+        if getattr(args, "weight_archive", False):
+            run_name += "_wa"
         wandb.init(
             project="FedPruning",
             name=run_name,

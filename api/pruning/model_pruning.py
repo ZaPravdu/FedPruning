@@ -22,6 +22,7 @@ class SparseModel(nn.Module):
 
         self.model = model
         self.mask_dict = mask_dict
+        self.weight_archive = None       # dense archive for mag_grad_mag metric
         self.strategy = strategy
         self.target_density = target_density      # static ultimate target
         self.ignore_layers = ignore_layers
@@ -450,7 +451,11 @@ class SparseModel(nn.Module):
             if self.layer_density_dict and name in self.layer_density_dict:
                 min_keep = int(weight.numel() * self.layer_density_dict[name])
 
-            metric = compute_cdf_metric(weight, mask, adjustment_type)
+            archive_weight = None
+            if (self.weight_archive is not None and name in self.weight_archive
+                    and adjustment_type == "mag_grad_mag"):
+                archive_weight = self.weight_archive[name].to(weight.device, non_blocking=True)
+            metric = compute_cdf_metric(weight, mask, adjustment_type, archive_weight=archive_weight)
             new_mask = cdf_prune_by_metric(metric, weight, mask, p, min_keep=min_keep)
 
             keep_count = int((new_mask.view(-1) != 0).sum().item())
@@ -554,7 +559,57 @@ class SparseModel(nn.Module):
         actual_density = num_remain_elements/ self.num_overall_elements
 
         return actual_density, actual_layer_wise_density
-    
+
+    # ── weight_archive: dense weight copy for mag_grad_mag metric ──
+
+    @torch.no_grad()
+    def init_weight_archive(self):
+        """Initialize weight_archive as a full clone of all model parameters."""
+        self.weight_archive = {}
+        for name, param in self.model.named_parameters():
+            self.weight_archive[name] = param.data.clone().detach().cpu()
+        logging.info(f"[WEIGHT_ARCHIVE] initialized from model, {len(self.weight_archive)} layers")
+
+    @torch.no_grad()
+    def update_weight_archive(self, mask_source_dict):
+        """Update weight_archive at positions where mask_source_dict == 1.
+
+        Only updates where mask == 1 — masked-out positions keep their
+        historical archive value so they retain non-zero magnitude for
+        mag_grad_mag metric computation later.
+
+        Args:
+            mask_source_dict: dict of float masks (0.0/1.0) keyed by param name.
+                Positions with value 1.0 get current model weight copied to archive.
+        """
+        if self.weight_archive is None:
+            logging.warning("[WEIGHT_ARCHIVE] not initialized, skipping update")
+            return
+
+        total_updated = 0
+        layer_stats = {}
+        for name, param in self.model.named_parameters():
+            if name not in self.weight_archive:
+                continue
+            if name not in mask_source_dict:
+                continue
+
+            mask = mask_source_dict[name].bool()
+            n_updated = mask.sum().item()
+            if n_updated == 0:
+                continue
+
+            self.weight_archive[name][mask] = param.data[mask].clone().detach().cpu()
+            total_updated += n_updated
+            layer_stats[name] = n_updated
+
+        logging.info(
+            f"[WEIGHT_ARCHIVE] updated {total_updated:,} elements across "
+            f"{len(layer_stats)} layers"
+        )
+
+    # ────────────────────────────────────────────────────────────────
+
     def adjust_mask_dict(self, gradients, t, T_end, alpha):
         self.mask_dict = sparse_update_step(self.model, gradients, self.mask_dict, t, T_end, alpha)
 
