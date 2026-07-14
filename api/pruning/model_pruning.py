@@ -627,13 +627,13 @@ class SparseModel(nn.Module):
             if name not in mask_source_dict:
                 continue
 
-            mask = mask_source_dict[name].bool()
-            mask_cpu = mask.cpu()
+            mask_gpu = mask_source_dict[name].bool().to(param.device, non_blocking=True)
+            mask_cpu = mask_gpu.cpu()
             n_updated = mask_cpu.sum().item()
             if n_updated == 0:
                 continue
 
-            self.weight_archive[name][mask_cpu] = param.data[mask].clone().detach().cpu()
+            self.weight_archive[name][mask_cpu] = param.data[mask_gpu].clone().detach().cpu()
             total_updated += n_updated
             layer_stats[name] = n_updated
 
