@@ -455,7 +455,7 @@ class SparseModel(nn.Module):
             archive_weight = None
             if (self.weight_archive is not None and name in self.weight_archive
                     and adjustment_type == "mag_grad_mag"):
-                archive_weight = self.weight_archive[name].to(weight.device, non_blocking=True)
+                archive_weight = self.weight_archive[name].to(weight.device)
             metric = compute_cdf_metric(weight, mask, adjustment_type, archive_weight=archive_weight)
             new_mask = cdf_prune_by_metric(metric, weight, mask, p, min_keep=min_keep)
 
@@ -552,7 +552,7 @@ class SparseModel(nn.Module):
             old_mask = self._prev_mask_dict[name].bool().to(new_mask.device)
             revived = new_mask & ~old_mask
             if revived.any():
-                archive_w = self.weight_archive[name].to(weight.device, non_blocking=True)
+                archive_w = self.weight_archive[name].to(weight.device)
                 weight.data[revived] = archive_w[revived].clone()
                 restored_total += revived.sum().item()
 
@@ -627,7 +627,7 @@ class SparseModel(nn.Module):
             if name not in mask_source_dict:
                 continue
 
-            mask_gpu = mask_source_dict[name].bool().to(param.device, non_blocking=True)
+            mask_gpu = mask_source_dict[name].bool().to(param.device)
             mask_cpu = mask_gpu.cpu()
             n_updated = mask_cpu.sum().item()
             if n_updated == 0:
