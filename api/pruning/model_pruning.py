@@ -23,6 +23,7 @@ class SparseModel(nn.Module):
         self.model = model
         self.mask_dict = mask_dict
         self.weight_archive = None       # dense archive for mag_grad_mag metric
+        self._prev_mask_dict = None      # snapshot for detecting revived positions in apply_mask
         self.strategy = strategy
         self.target_density = target_density      # static ultimate target
         self.ignore_layers = ignore_layers
@@ -528,8 +529,39 @@ class SparseModel(nn.Module):
                 try:
                     weight.data = weight.data * self.mask_dict[name]
                 except RuntimeError:
-                    raise RuntimeError(f"the device for weight is {weight.device} and mask_dict is on {self.mask_dict[name].device}") 
-                
+                    raise RuntimeError(f"the device for weight is {weight.device} and mask_dict is on {self.mask_dict[name].device}")
+
+    @torch.no_grad()
+    def restore_revived_from_archive(self):
+        """Restore weights at newly revived (mask 0->1) positions from weight_archive.
+
+        Call AFTER apply_mask() only when mask_dict has just changed (after
+        prune/grow or server mask update). Compares current mask_dict with
+        cached _prev_mask_dict to find revived positions, restores them, then
+        updates the cache.
+        """
+        if self.weight_archive is None or self._prev_mask_dict is None:
+            return
+        restored_total = 0
+        for name, weight in self.model.named_parameters():
+            if name not in self.mask_dict or name not in self.weight_archive:
+                continue
+            if name not in self._prev_mask_dict:
+                continue
+            new_mask = self.mask_dict[name].bool()
+            old_mask = self._prev_mask_dict[name].bool()
+            revived = new_mask & ~old_mask
+            if revived.any():
+                archive_w = self.weight_archive[name].to(weight.device, non_blocking=True)
+                weight.data[revived] = archive_w[revived].clone()
+                restored_total += revived.sum().item()
+
+        if restored_total:
+            logging.info(f"[WEIGHT_ARCHIVE] restored {restored_total:,} revived positions from archive")
+
+        # cache for next comparison
+        self._prev_mask_dict = {k: v.clone() for k, v in self.mask_dict.items()}
+
     @torch.no_grad()
     def apply_mask_gradients(self):
         """
@@ -569,6 +601,7 @@ class SparseModel(nn.Module):
         for name, param in self.model.named_parameters():
             self.weight_archive[name] = param.data.clone().detach().cpu()
         logging.info(f"[WEIGHT_ARCHIVE] initialized from model, {len(self.weight_archive)} layers")
+        self._prev_mask_dict = {k: v.clone() for k, v in self.mask_dict.items()}
 
     @torch.no_grad()
     def update_weight_archive(self, mask_source_dict):

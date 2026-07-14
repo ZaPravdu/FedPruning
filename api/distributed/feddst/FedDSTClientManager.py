@@ -80,6 +80,10 @@ class FedDSTClientManager(ClientManager):
             self.trainer.trainer.model.update_weight_archive(
                 self.trainer.trainer.model.mask_dict
             )
+            # sync mask cache so next restore_revived_from_archive() compares correctly
+            self.trainer.trainer.model._prev_mask_dict = {
+                k: v.clone() for k, v in self.trainer.trainer.model.mask_dict.items()
+            }
 
         self.__train()
         if self.round_idx == self.num_rounds:

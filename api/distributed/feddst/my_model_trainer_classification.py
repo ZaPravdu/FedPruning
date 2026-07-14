@@ -145,6 +145,8 @@ class MyModelTrainer(ModelTrainer):
                 loss.backward()
                 model.general_cdf_prune(p=args.p, adjustment_type=adjust_type)
                 model.apply_mask()
+                if getattr(args, "weight_archive", False) and model.weight_archive is not None:
+                    model.restore_revived_from_archive()
 
                 # ── diagnostic: capture density after CDF ──
                 post_density, post_layer = model.stat_actual_density()
