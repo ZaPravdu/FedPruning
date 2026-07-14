@@ -456,7 +456,7 @@ class SparseModel(nn.Module):
             if (self.weight_archive is not None and name in self.weight_archive
                     and adjustment_type == "mag_grad_mag"):
                 archive_weight = self.weight_archive[name].to(weight.device)
-            metric = compute_cdf_metric(weight, mask, adjustment_type, archive_weight=archive_weight)
+            metric = compute_cdf_metric(weight, adjustment_type, archive_weight=archive_weight)
             new_mask = cdf_prune_by_metric(metric, weight, mask, p, min_keep=min_keep)
 
             keep_count = int((new_mask.view(-1) != 0).sum().item())

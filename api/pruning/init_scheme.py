@@ -96,52 +96,56 @@ def random_prune(old_mask, num_elements, density):
     return new_mask
 
 
-def compute_cdf_metric(weight, mask, adjustment_type="mag_cdf", archive_weight=None):
-    """Compute importance metric matrix for CDF pruning.
+def compute_cdf_metric(weight, adjustment_type="mag_cdf", archive_weight=None):
+    """Compute importance metric on the full weight matrix for CDF pruning.
 
-    Returns a metric tensor of the same shape as weight,
-    used by cdf_prune_by_metric to make pruning decisions.
+    Computes a per-element importance metric based on weight magnitude,
+    gradient, or a combination, always on the full dense matrix. Mask
+    filtering is handled by cdf_prune_by_metric, not here.
 
     Args:
         weight: weight tensor
-        mask: binary mask tensor
-        adjustment_type: metric type ("mag_cdf", "magnitude", etc.)
+        adjustment_type: metric type ("mag_cdf", "magnitude", "mag_grad_mag")
         archive_weight: optional dense weight tensor from weight_archive;
             used as magnitude source for mag_grad_mag so pruned positions
             retain non-zero metric values
     Returns:
-        metric: importance metric tensor (same shape as weight)
+        metric: importance metric tensor (same shape as weight), or None
     Raises:
         ValueError: on unknown adjustment_type
     """
     if adjustment_type is None:
         return None
 
-    masked_w = weight.data * mask
     if adjustment_type in ("mag_cdf", "magnitude"):
-        return masked_w.abs()
+        return weight.data.abs()
     elif adjustment_type == "mag_grad_mag":
         if weight.grad is None:
             raise RuntimeError(f"mag_grad_mag: grad is None for {weight.shape}, "
                                "call backward() before pruning")
         mag_src = archive_weight if archive_weight is not None else weight.data
-        return (weight.grad.abs() * mag_src.abs()) * mask
+        return weight.grad.abs() * mag_src.abs()
     else:
         raise ValueError(f"Unknown CDF metric adjustment_type: {adjustment_type}")
 
 
-def cdf_prune_by_metric(metric, weight, mask, p=0.85, min_keep=None):
-    """CDF prune: keep active elements covering fraction p of total metric.
+def cdf_prune_by_metric(metric, weight, mask, p=0.85, min_keep=None, use_mask=False):
+    """CDF prune: keep elements covering fraction p of total metric.
 
     Pure pruning decision based on the provided metric matrix.
     Does NOT mutate mask in-place — returns a new mask.
+
+    By default (use_mask=False), considers all positions in the metric
+    matrix. When use_mask=True, only considers mask=1 positions,
+    preserving the original behavior.
 
     Args:
         metric: importance metric tensor (same shape as weight, or None → no-op)
         weight: weight tensor (used for shape/debug only)
         mask: binary mask tensor
         p: fraction of total metric sum to retain (0 < p <= 1)
-        min_keep: if set, keep at least this many active elements (floor lock)
+        min_keep: if set, keep at least this many elements (floor lock)
+        use_mask: if True, restrict CDF to mask=1 positions only
     Returns:
         new_mask: binary mask tensor
     """
@@ -149,32 +153,43 @@ def cdf_prune_by_metric(metric, weight, mask, p=0.85, min_keep=None):
         return mask.clone()
 
     assert 0.0 < p <= 1.0
-    flat_mask = mask.view(-1).bool()
-    active_mask = flat_mask != 0
-    active_num = active_mask.sum().item()
-
-    if active_num == 0:
-        return torch.zeros_like(mask)
-
     flat_metric = metric.view(-1)
-    active_metric = flat_metric[active_mask]
-    sorted_vals, idx = torch.sort(active_metric, descending=True)
+    total_elements = flat_metric.numel()
+
+    if use_mask:
+        # original behavior: only consider active (mask=1) positions
+        flat_mask = mask.view(-1).bool()
+        active_mask = flat_mask != 0
+        active_num = active_mask.sum().item()
+        if active_num == 0:
+            return torch.zeros_like(mask)
+        selected_metric = flat_metric[active_mask]
+        cap = active_num
+    else:
+        # full-matrix: consider all positions
+        selected_metric = flat_metric
+        cap = total_elements
+
+    sorted_vals, idx = torch.sort(selected_metric, descending=True)
     total = sorted_vals.sum()
     if total == 0:
         return mask.clone()
 
     cumsum = torch.cumsum(sorted_vals, dim=0)
     keep_count = int((cumsum < p * total).sum().item()) + 1
-    keep_count = max(1, min(keep_count, active_num))
+    keep_count = max(1, min(keep_count, cap))
 
     # floor lock: ensure at least min_keep elements survive
     if min_keep is not None:
         keep_count = max(keep_count, min_keep)
-        keep_count = min(keep_count, active_num)
+        keep_count = min(keep_count, cap)
 
     new_mask = torch.zeros_like(mask)
-    active_positions = torch.where(active_mask)[0]
-    new_mask.view(-1)[active_positions[idx[:keep_count]]] = 1.0
+    if use_mask:
+        active_positions = torch.where(flat_mask)[0]
+        new_mask.view(-1)[active_positions[idx[:keep_count]]] = 1.0
+    else:
+        new_mask.view(-1)[idx[:keep_count]] = 1.0
     return new_mask
 
 
