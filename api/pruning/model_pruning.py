@@ -549,7 +549,7 @@ class SparseModel(nn.Module):
             if name not in self._prev_mask_dict:
                 continue
             new_mask = self.mask_dict[name].bool()
-            old_mask = self._prev_mask_dict[name].bool()
+            old_mask = self._prev_mask_dict[name].bool().to(new_mask.device)
             revived = new_mask & ~old_mask
             if revived.any():
                 archive_w = self.weight_archive[name].to(weight.device, non_blocking=True)
