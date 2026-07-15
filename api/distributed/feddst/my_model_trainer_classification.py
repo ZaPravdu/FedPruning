@@ -296,8 +296,8 @@ class MyModelTrainer(ModelTrainer):
                 pass
             elif model.has_gated_convs():
                 model.prune_by_gate_cdf(p=args.p)
-            elif adjust_type in ("mag_cdf", "mag_grad_mag"):
-                self.cdf_prune(p=args.p, adjustment_type=adjust_type)
+            elif adjust_type == "mag_cdf":
+                self.cdf_prune(p=args.p, adjustment_type="mag_cdf")
             elif adjust_type == "channel_l1_cdf":
                 model.channel_l1_cdf_prune(p=args.p)
             else:
@@ -335,6 +335,11 @@ class MyModelTrainer(ModelTrainer):
             round_entry["l1_loss_avg"] = l1_avg
             round_entry["l1_loss_count"] = len(l1_losses_epoch)
         # ──────────────────────────────────────────────────────
+
+        # ── mag_grad_mag CDF pruning (after all local epochs, not in middle) ──
+        if mode in [2, 3] and adjust_type == "mag_grad_mag" and not getattr(args, "local_refinement", False):
+            self.cdf_prune(p=args.p, adjustment_type="mag_grad_mag")
+        # ──────────────────────────────────────────────────────────────────────
 
         # ── weight_archive: record trained positions after local round ──
         if getattr(args, "weight_archive", False) and self.model.weight_archive is not None:
