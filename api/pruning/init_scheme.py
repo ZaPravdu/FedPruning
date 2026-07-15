@@ -96,7 +96,7 @@ def random_prune(old_mask, num_elements, density):
     return new_mask
 
 
-def cdf_prune_by_metric(metric, mask, p=0.85, min_keep=None, use_mask=False):
+def cdf_prune_by_metric(metric, mask, p=0.85, min_keep=None, use_mask=True):
     """CDF prune: keep elements covering fraction p of total metric.
 
     Pure pruning decision based on the provided metric matrix.
