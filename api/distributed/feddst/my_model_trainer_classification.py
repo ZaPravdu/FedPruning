@@ -337,7 +337,7 @@ class MyModelTrainer(ModelTrainer):
         # ──────────────────────────────────────────────────────
 
         # ── mag_grad_mag CDF pruning (after all local epochs, not in middle) ──
-        if mode in [2, 3] and adjust_type == "mag_grad_mag" and not getattr(args, "local_refinement", False):
+        if mode in [0, 3] and adjust_type == "mag_grad_mag" and not getattr(args, "local_refinement", False):
             self.cdf_prune(p=args.p, adjustment_type="mag_grad_mag")
         # ──────────────────────────────────────────────────────────────────────
 
