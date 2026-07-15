@@ -110,8 +110,7 @@ class FedDSTServerManager(ServerManager):
                         metric = freq_dict.get(k)
                         if metric is not None:
                             candidate[k] = cdf_prune_by_metric(
-                                metric, model.model.get_parameter(k),
-                                candidate[k], p=self.args.p, min_keep=min_keep,
+                                metric, candidate[k], p=self.args.p, min_keep=min_keep,
                             )
                     model.mask_dict = candidate
                     logging.info(f"[TOP_P_AGGREGATE] round={self.round_idx} p={self.args.p}")

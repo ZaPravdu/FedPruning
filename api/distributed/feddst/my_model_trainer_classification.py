@@ -62,6 +62,90 @@ class MyModelTrainer(ModelTrainer):
             loss = loss + reg_w * self.model.compute_vd_regularization()
         return loss
 
+    # ── CDF pruning (moved from SparseModel.general_cdf_prune) ──
+
+    def compute_gradients(self):
+        """Compute gradients for one batch from self._train_data.
+
+        Returns dict of {name: param.grad.clone()} for all trainable params.
+        """
+        assert self._train_data is not None, "self._train_data not set"
+        model = self.model
+        device = next(model.parameters()).device
+        model.zero_grad()
+        x, labels = next(iter(self._train_data))
+        x, labels = x.to(device), labels.to(device)
+        criterion = nn.CrossEntropyLoss().to(device)
+        loss = criterion(model(x), labels)
+        loss.backward()
+        grads = {name: param.grad.clone()
+                 for name, param in model.named_parameters()
+                 if param.grad is not None}
+        model.zero_grad()
+        return grads
+
+    def compute_cdf_metric(self, adjustment_type):
+        """Compute CDF importance metric per masked layer.
+
+        Returns {name: metric_tensor} for layers in model.mask_dict.
+        Raises ValueError on unknown adjustment_type.
+        """
+        model = self.model
+
+        if adjustment_type in ("mag_cdf", "magnitude"):
+            return {name: param.data.abs()
+                    for name, param in model.named_parameters()
+                    if name in model.mask_dict}
+
+        elif adjustment_type == "mag_grad_mag":
+            grads = self.compute_gradients()
+            metrics = {}
+            for name, param in model.named_parameters():
+                if name not in model.mask_dict:
+                    continue
+                if name not in grads:
+                    raise RuntimeError(
+                        f"mag_grad_mag: no gradient for {name}; "
+                        "ensure the parameter requires_grad"
+                    )
+                archive = None
+                if model.weight_archive is not None and name in model.weight_archive:
+                    archive = model.weight_archive[name].to(param.device, non_blocking=True)
+                mag_src = archive if archive is not None else param.data
+                metrics[name] = grads[name].abs() * mag_src.abs()
+            return metrics
+
+        else:
+            raise ValueError(f"Unknown CDF metric adjustment_type: {adjustment_type}")
+
+    def cdf_prune(self, p, adjustment_type):
+        """Orchestrate CDF pruning across all masked layers.
+
+        1. Calls compute_cdf_metric to get importance metrics
+        2. Applies cdf_prune_by_metric per layer in mask_dict
+        3. Calls model.apply_mask() to materialize the new mask
+
+        Replaces SparseModel.general_cdf_prune — now hosted on MyModelTrainer
+        so gradient-dependent metrics (mag_grad_mag) can compute needed data.
+        """
+        assert adjustment_type is not None, "adjustment_type must not be None"
+        from ...pruning.init_scheme import cdf_prune_by_metric
+
+        metrics = self.compute_cdf_metric(adjustment_type)
+        model = self.model
+
+        for name, mask in model.mask_dict.items():
+            if name not in metrics:
+                continue
+            min_keep = None
+            if getattr(model, 'layer_density_dict', None) and name in model.layer_density_dict:
+                min_keep = int(mask.numel() * model.layer_density_dict[name])
+            model.mask_dict[name] = cdf_prune_by_metric(metrics[name], mask, p, min_keep=min_keep)
+
+        model.apply_mask()
+
+    # ─────────────────────────────────────────────────────────────────────────
+
     def train(self, train_data, device, args, mode, round_idx = None):
 
         # mode 0 :  training with mask
@@ -71,6 +155,7 @@ class MyModelTrainer(ModelTrainer):
         model = self.model
         model.to(device)
         model.train()
+        self._train_data = train_data
 
         # auto-disable weight decay when L1 regularization is active
         if getattr(args, "reg_mode", "") == "l1" and getattr(args, "reg_weight", 0.0) > 0:
@@ -138,13 +223,7 @@ class MyModelTrainer(ModelTrainer):
                         }
                 # ───────────────────────────────────────────────────────────
 
-                x, labels = next(iter(train_data))
-                x, labels = x.to(device), labels.to(device)
-                model.zero_grad()
-                loss = criterion(model(x), labels)
-                loss.backward()
-                model.general_cdf_prune(p=args.p, adjustment_type=adjust_type)
-                model.apply_mask()
+                self.cdf_prune(p=args.p, adjustment_type=adjust_type)
                 if getattr(args, "weight_archive", False) and model.weight_archive is not None:
                     model.restore_revived_from_archive()
 
@@ -217,8 +296,8 @@ class MyModelTrainer(ModelTrainer):
                 pass
             elif model.has_gated_convs():
                 model.prune_by_gate_cdf(p=args.p)
-            elif adjust_type == "mag_cdf":
-                model.general_cdf_prune(p=args.p, adjustment_type="mag_cdf")
+            elif adjust_type in ("mag_cdf", "mag_grad_mag"):
+                self.cdf_prune(p=args.p, adjustment_type=adjust_type)
             elif adjust_type == "channel_l1_cdf":
                 model.channel_l1_cdf_prune(p=args.p)
             else:

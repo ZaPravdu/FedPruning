@@ -1,7 +1,7 @@
 import torch
 from typing import Dict, List
 from torch import nn
-from api.pruning.init_scheme import generate_layer_density_dict, pruning, sparse_update_step, sparse_pruning_step, sparse_growing_step, compute_cdf_metric, cdf_prune_by_metric
+from api.pruning.init_scheme import generate_layer_density_dict, pruning, sparse_update_step, sparse_pruning_step, sparse_growing_step
 from api.model.cv.resnet import iter_gated_convs, iter_vd_convs
 import warnings
 import logging
@@ -411,62 +411,6 @@ class SparseModel(nn.Module):
                 self.mask_dict[bias_name][~keep_mask] = 0.0
 
         self.apply_mask()
-        return prune_stats
-
-    @torch.no_grad()
-    def general_cdf_prune(self, p=0.85, adjustment_type="mag_cdf"):
-        """Generic element-wise CDF pruning with configurable metric.
-
-        For each masked layer: computes an importance metric matrix
-        via compute_cdf_metric, then applies CDF pruning via
-        cdf_prune_by_metric to retain the active elements covering
-        fraction p of total metric sum.
-
-        If layer_density_dict (from target_density) is set, each layer keeps at least
-        target_density × num_elements elements (CDF lock).
-
-        Metric type (e.g. "mag", "magnitude") is controlled by
-        adjustment_type — extend compute_cdf_metric() to add new ones.
-
-        Args:
-            p: fraction of total metric sum to retain (0 < p <= 1)
-            adjustment_type: metric type forwarded to compute_cdf_metric
-        Returns:
-            prune_stats dict per layer
-        """
-        assert 0.0 < p <= 1.0, f"p must be in (0,1], got {p}"
-        prune_stats = {}
-        num_remain_elements = 0
-        num_total_elements = 0
-        for name, weight in self.model.named_parameters():
-            if name not in self.mask_dict:
-                continue
-            mask = self.mask_dict[name]
-            active_num = int((mask.view(-1) != 0).sum().item())
-            num_total_elements += active_num
-            if active_num == 0:
-                continue
-
-            # floor lock: at least target_density × num_elements per layer
-            min_keep = None
-            if self.layer_density_dict and name in self.layer_density_dict:
-                min_keep = int(weight.numel() * self.layer_density_dict[name])
-
-            archive_weight = None
-            if (self.weight_archive is not None and name in self.weight_archive
-                    and adjustment_type == "mag_grad_mag"):
-                archive_weight = self.weight_archive[name].to(weight.device)
-            metric = compute_cdf_metric(weight, adjustment_type, archive_weight=archive_weight)
-            new_mask = cdf_prune_by_metric(metric, weight, mask, p, min_keep=min_keep)
-
-            keep_count = int((new_mask.view(-1) != 0).sum().item())
-            num_remain_elements += keep_count
-            self.mask_dict[name] = new_mask
-            prune_stats[name] = {"kept": keep_count, "total": active_num}
-
-        self.apply_mask()
-        logging.debug(f"{adjustment_type}_cdf_prune: kept {num_remain_elements}/{num_total_elements} "
-                      f"({num_remain_elements/num_total_elements:.4f})")
         return prune_stats
 
     @torch.no_grad()

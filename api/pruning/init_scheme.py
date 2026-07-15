@@ -96,40 +96,7 @@ def random_prune(old_mask, num_elements, density):
     return new_mask
 
 
-def compute_cdf_metric(weight, adjustment_type="mag_cdf", archive_weight=None):
-    """Compute importance metric on the full weight matrix for CDF pruning.
-
-    Computes a per-element importance metric based on weight magnitude,
-    gradient, or a combination, always on the full dense matrix. Mask
-    filtering is handled by cdf_prune_by_metric, not here.
-
-    Args:
-        weight: weight tensor
-        adjustment_type: metric type ("mag_cdf", "magnitude", "mag_grad_mag")
-        archive_weight: optional dense weight tensor from weight_archive;
-            used as magnitude source for mag_grad_mag so pruned positions
-            retain non-zero metric values
-    Returns:
-        metric: importance metric tensor (same shape as weight), or None
-    Raises:
-        ValueError: on unknown adjustment_type
-    """
-    if adjustment_type is None:
-        return None
-
-    if adjustment_type in ("mag_cdf", "magnitude"):
-        return weight.data.abs()
-    elif adjustment_type == "mag_grad_mag":
-        if weight.grad is None:
-            raise RuntimeError(f"mag_grad_mag: grad is None for {weight.shape}, "
-                               "call backward() before pruning")
-        mag_src = archive_weight if archive_weight is not None else weight.data
-        return weight.grad.abs() * mag_src.abs()
-    else:
-        raise ValueError(f"Unknown CDF metric adjustment_type: {adjustment_type}")
-
-
-def cdf_prune_by_metric(metric, weight, mask, p=0.85, min_keep=None, use_mask=False):
+def cdf_prune_by_metric(metric, mask, p=0.85, min_keep=None, use_mask=False):
     """CDF prune: keep elements covering fraction p of total metric.
 
     Pure pruning decision based on the provided metric matrix.
@@ -140,8 +107,7 @@ def cdf_prune_by_metric(metric, weight, mask, p=0.85, min_keep=None, use_mask=Fa
     preserving the original behavior.
 
     Args:
-        metric: importance metric tensor (same shape as weight, or None → no-op)
-        weight: weight tensor (used for shape/debug only)
+        metric: importance metric tensor (or None → no-op)
         mask: binary mask tensor
         p: fraction of total metric sum to retain (0 < p <= 1)
         min_keep: if set, keep at least this many elements (floor lock)
