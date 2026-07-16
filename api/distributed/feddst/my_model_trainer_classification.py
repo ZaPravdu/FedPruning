@@ -339,7 +339,23 @@ class MyModelTrainer(ModelTrainer):
         # ── mag_grad_mag CDF pruning (after all local epochs, not in middle) ──
         if mode in [0, 3] and adjust_type == "mag_grad_mag" and not getattr(args, "local_refinement", False):
             self.cdf_prune(p=args.p, adjustment_type="mag_grad_mag")
+            # ── 验证: mask=0 的位置权重也必须为 0 ──
+            _params = dict(model.named_parameters())
+            for _name in model.mask_dict:
+                if _name not in _params:
+                    continue
+                _mask = model.mask_dict[_name]
+                _zpos = (_mask == 0)
+                if _zpos.any():
+                    _w = _params[_name].data
+                    assert (_w[_zpos.to(_w.device, non_blocking=True)] == 0).all(), \
+                        f"[PRUNE_CHECK] {_name}: mask=0 but weight non-zero after cdf_prune!"
+            # ──────────────────────────────────────────────
         # ──────────────────────────────────────────────────────────────────────
+
+        # ── 保险: 返回前确保权重与 mask 同步 ──
+        model.apply_mask()
+        # ─────────────────────────────────────
 
         # ── weight_archive: record trained positions after local round ──
         if getattr(args, "weight_archive", False) and self.model.weight_archive is not None:
