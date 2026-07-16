@@ -370,6 +370,10 @@ class MyModelTrainer(ModelTrainer):
         model.to(device)
         model.eval()
 
+        # ── DIAG: 记录 test 前模型的 mask 密度 ──
+        pre_test_mask_density = model.compute_gate_guided_density()
+        # ──────────────────────────────────────
+
         metrics = {
             'Accuracy': 0,
             'Loss': 0,
@@ -387,6 +391,25 @@ class MyModelTrainer(ModelTrainer):
 
                 _, predicted = torch.max(pred, -1)
                 correct = predicted.eq(target).sum()
+
+                # ── DIAG: 第一个 batch forward 后，测实际权重非零比例 ──
+                if batch_idx == 0:
+                    total_el = 0
+                    nonzero_el = 0
+                    for name, p in model.named_parameters():
+                        total_el += p.numel()
+                        nonzero_el += (p != 0).sum().item()
+                    actual_density = nonzero_el / max(total_el, 1)
+                    post_forward_mask_density = model.compute_gate_guided_density()
+                    match = "OK" if abs(actual_density - post_forward_mask_density) < 1e-4 else "MISMATCH"
+                    logging.warning(
+                        f"[DIAG_TEST] actual_density={actual_density:.6f} "
+                        f"mask_density_pre={pre_test_mask_density:.6f} "
+                        f"mask_density_post={post_forward_mask_density:.6f} "
+                        f"apply_mask={kwargs.get('apply_mask', 'default')} "
+                        f"{match}"
+                    )
+                # ──────────────────────────────────────────────────────
 
                 metrics['Accuracy'] += correct.item()
                 metrics['Loss'] += loss.item() * target.size(0)

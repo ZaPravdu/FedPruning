@@ -163,6 +163,30 @@ class FedDSTServerManager(ServerManager):
                 else:
                     logging.info("[MASK_FOR_COMM] skipping server apply_mask — weights kept dense for inference")
 
+                # ── DIAG: top_p_aggregate/mask 处理后的实际 mask 密度 ──
+                _mask_total = 0
+                _mask_nonzero = 0
+                for name, m in model.mask_dict.items():
+                    _mask_total += m.numel()
+                    _mask_nonzero += (m != 0).sum().item()
+                _diag_mask_density = _mask_nonzero / max(_mask_total, 1)
+                # 同时算实际 weight 密度（如果有 apply_mask 则应与 mask 密度一致）
+                _wt_total = 0
+                _wt_nonzero = 0
+                for name, p in model.named_parameters():
+                    _wt_total += p.numel()
+                    _wt_nonzero += (p != 0).sum().item()
+                _diag_wt_density = _wt_nonzero / max(_wt_total, 1)
+                _diag_match = "OK" if abs(_diag_mask_density - _diag_wt_density) < 1e-4 else "MISMATCH"
+                logging.warning(
+                    f"[DIAG_SERVER] round={self.round_idx} mode={self.mode} "
+                    f"mask_density={_diag_mask_density:.6f} "
+                    f"weight_density={_diag_wt_density:.6f} "
+                    f"target_density={self.args.target_density} p={self.args.p} "
+                    f"{_diag_match}"
+                )
+                # ────────────────────────────────────────────────────────
+
             # ── diagnostic: server density before logging ──
             server_d = self.aggregator.trainer.model.compute_gate_guided_density()
             self.aggregator.diagnostics["server_densities"].append({
