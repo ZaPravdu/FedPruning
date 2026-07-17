@@ -158,10 +158,7 @@ class FedDSTServerManager(ServerManager):
 
                 # model.mask_dict = global_mask
                 model.to(self.aggregator.device)
-                if not getattr(self.args, "mask_for_comm", False):
-                    model.apply_mask()
-                else:
-                    logging.info("[MASK_FOR_COMM] skipping server apply_mask — weights kept dense for inference")
+                model.apply_mask()
 
                 # ── DIAG: top_p_aggregate/mask 处理后的实际 mask 密度 ──
                 _mask_total = 0
@@ -199,8 +196,7 @@ class FedDSTServerManager(ServerManager):
             self.aggregator.log_communication_cost(self.round_idx, self.args.client_num_per_round)
 
             # logging.info("mask_dict after pruning and growing = " +str(mask_dict))
-            kwargs = {"apply_mask": not getattr(self.args, "mask_for_comm", False)}
-            self.aggregator.test_on_server_for_all_clients(self.round_idx, **kwargs)
+            self.aggregator.test_on_server_for_all_clients(self.round_idx)
             
             # start the next round
             self.round_idx += 1
