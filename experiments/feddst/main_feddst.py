@@ -90,18 +90,11 @@ def add_args(parser):
                         help='learning rate (default: 0.001)')
 
     parser.add_argument(
-        "--local_refinement",
-        action="store_true",
-        default=False,
-        help="client prunes mask on receive from server, skips prune/grow in mode 2",
-    )
-
-    parser.add_argument(
-        "--weight_archive",
-        action="store_true",
-        default=False,
-        help="maintain a dense weight archive on client for mag_grad_mag metric; "
-             "uses unpruned weight magnitudes so pruned positions retain non-zero metric values",
+        "--cdf_pos",
+        type=str,
+        default="post-train",
+        choices=["pre-train", "post-train"],
+        help="when to apply CDF pruning: pre-train (prune then train) or post-train (train then prune)",
     )
 
     parser.add_argument(
@@ -149,8 +142,8 @@ def add_args(parser):
         "--adjustment_type",
         type=str,
         default=None,
-        choices=["mag", "mag_cdf", "mag_grad_mag", "channel_l1_cdf"],
-        help="pruning strategy in adjustment rounds (default: None = original FedDST prune+grow). options: mag | mag_cdf | mag_grad_mag | channel_l1_cdf",
+        choices=["mag", "mag_cdf", "mag_grad_mag"],
+        help="pruning strategy in adjustment rounds (default: None = original FedDST prune+grow). options: mag | mag_cdf | mag_grad_mag",
     )
 
     parser.add_argument(
@@ -412,8 +405,7 @@ if __name__ == "__main__":
         run_name = method_name + "_" + args.dataset + "_" + args.model
         if getattr(args, "top_p_aggregate", False):
             run_name += "_p" + str(args.p)
-        if getattr(args, "weight_archive", False):
-            run_name += "_wa"
+        run_name += "_" + getattr(args, "cdf_pos", "post-train")
         wandb.init(
             project="FedPruning",
             name=run_name,

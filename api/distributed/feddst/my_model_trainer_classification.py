@@ -24,7 +24,7 @@ class MyModelTrainer(ModelTrainer):
                 "reg_mode": getattr(args, "reg_mode", None),
                 "reg_weight": getattr(args, "reg_weight", None),
                 "reg_adjust_only": getattr(args, "reg_adjust_only", False),
-                "local_refinement": getattr(args, "local_refinement", False),
+                "cdf_pos": getattr(args, "cdf_pos", "post-train"),
                 "adjustment_type": getattr(args, "adjustment_type", None),
                 "client_optimizer": getattr(args, "client_optimizer", ""),
                 "lr": getattr(args, "lr", None),
@@ -92,7 +92,7 @@ class MyModelTrainer(ModelTrainer):
         """
         model = self.model
 
-        if adjustment_type in ("mag_cdf", "magnitude"):
+        if adjustment_type == "mag_cdf":
             return {name: param.data.abs()
                     for name, param in model.named_parameters()
                     if name in model.mask_dict}
@@ -108,10 +108,7 @@ class MyModelTrainer(ModelTrainer):
                         f"mag_grad_mag: no gradient for {name}; "
                         "ensure the parameter requires_grad"
                     )
-                archive = None
-                if model.weight_archive is not None and name in model.weight_archive:
-                    archive = model.weight_archive[name].to(param.device, non_blocking=True)
-                mag_src = archive if archive is not None else param.data
+                mag_src = param.data
                 metrics[name] = grads[name].abs() * mag_src.abs()
             return metrics
 
@@ -192,53 +189,54 @@ class MyModelTrainer(ModelTrainer):
             if getattr(args, "reopen_gate_on_adjust", 1) and model.has_gated_convs():
                 model.reopen_gated_channels()
 
-        # ── 预训练 CDF 剪枝 (替代 ClientManager.local_refinement，有数据可用梯度指标) ──
+        # ── 预训练 CDF 剪枝 (cdf_pos=pre-train: 收到 mask 后先剪再训) ──
         adjust_type = getattr(args, "adjustment_type", None)
-        if getattr(args, "local_refinement", False) and mode in [0, 3] and adjust_type:
+        if getattr(args, "cdf_pos", "post-train") == "pre-train" and mode in [0, 3] and adjust_type:
             # ── diagnostic: capture density + weight stats before CDF ──
-                pre_density, pre_layer = model.stat_actual_density()
-                # active weight statistics across all pruned layers
-                active_weights = []
-                for name, w in model.named_parameters():
-                    if name in model.mask_dict:
-                        m = model.mask_dict[name]
-                        active = w.data[m != 0].flatten()
-                        if active.numel() > 0:
-                            active_weights.append(active)
-                wstats = {}
-                if active_weights:
-                    all_a = torch.cat(active_weights)
-                    nz = all_a.numel()
-                    if nz > 0:
-                        sorted_a, _ = torch.sort(all_a.abs())
-                        wstats = {
-                            "mean": all_a.mean().item(),
-                            "std": all_a.std().item(),
-                            "p10": sorted_a[max(1, int(0.10 * nz)) - 1].item(),
-                            "p50": sorted_a[max(1, int(0.50 * nz)) - 1].item(),
-                            "p90": sorted_a[max(1, int(0.90 * nz)) - 1].item(),
-                            "min": sorted_a[0].item(),
-                            "max": sorted_a[-1].item(),
-                            "n_nonzero": nz,
-                        }
-                # ───────────────────────────────────────────────────────────
+            pre_density, pre_layer = model.stat_actual_density()
+            # active weight statistics across all pruned layers
+            active_weights = []
+            for name, w in model.named_parameters():
+                if name in model.mask_dict:
+                    m = model.mask_dict[name]
+                    active = w.data[m != 0].flatten()
+                    if active.numel() > 0:
+                        active_weights.append(active)
+            wstats = {}
+            if active_weights:
+                all_a = torch.cat(active_weights)
+                nz = all_a.numel()
+                if nz > 0:
+                    sorted_a, _ = torch.sort(all_a.abs())
+                    wstats = {
+                        "mean": all_a.mean().item(),
+                        "std": all_a.std().item(),
+                        "p10": sorted_a[max(1, int(0.10 * nz)) - 1].item(),
+                        "p50": sorted_a[max(1, int(0.50 * nz)) - 1].item(),
+                        "p90": sorted_a[max(1, int(0.90 * nz)) - 1].item(),
+                        "min": sorted_a[0].item(),
+                        "max": sorted_a[-1].item(),
+                        "n_nonzero": nz,
+                    }
+            # ───────────────────────────────────────────────────────────
 
+            # CDF-based methods prune here; "mag" (original FedDST) never prunes in mode 0/3
+            if adjust_type in ("mag_cdf", "mag_grad_mag"):
                 self.cdf_prune(p=args.p, adjustment_type=adjust_type)
-                if getattr(args, "weight_archive", False) and model.weight_archive is not None:
-                    model.restore_revived_from_archive()
+            # "mag": no pre-training pruning — original FedDST adjusts in mode 2 only
 
-                # ── diagnostic: capture density after CDF ──
-                post_density, post_layer = model.stat_actual_density()
-                keep_ratio = post_density / max(pre_density, 1e-8)
-                self.diagnostics["rounds"].append({
-                    "round": round_idx,
-                    "mode": mode,
-                    "density_before_cdf": pre_density,
-                    "density_after_cdf": post_density,
-                    "cdf_keep_ratio": keep_ratio,
-                    "weight_stats": wstats,
-                })
-                # ─────────────────────────────────────────────
+            # ── diagnostic: capture density after CDF ──
+            post_density, post_layer = model.stat_actual_density()
+            keep_ratio = post_density / max(pre_density, 1e-8)
+            self.diagnostics["rounds"].append({
+                "round": round_idx,
+                "mode": mode,
+                "density_before_cdf": pre_density,
+                "density_after_cdf": post_density,
+                "cdf_keep_ratio": keep_ratio,
+                "weight_stats": wstats,
+            })
+            # ─────────────────────────────────────────────
         # ───────────────────────────────────────────────────────────────────────
 
         for epoch in range(first_epochs):
@@ -291,19 +289,18 @@ class MyModelTrainer(ModelTrainer):
                 gradients = {name: param.grad.data.cpu().clone() for name, param in model.named_parameters() if param.requires_grad}
                 model.zero_grad()
 
-            # local refinement skips mode 2 prune/grow (already done on mask receipt)
-            if getattr(args, "local_refinement", False):
+            # mode 2 mask adjustment:
+            #   "mag"            → original FedDST prune+grow (density-maintaining)
+            #   "mag_cdf" etc.   → no-op: CDF pruning only when server sent a mask (mode 0/3)
+            #   pre-train CDF    → no-op (already CDF-pruned on mask receipt)
+            if getattr(args, "cdf_pos", "post-train") == "pre-train":
                 pass
             elif model.has_gated_convs():
                 model.prune_by_gate_cdf(p=args.p)
-            elif adjust_type == "mag_cdf":
-                self.cdf_prune(p=args.p, adjustment_type="mag_cdf")
-            elif adjust_type == "channel_l1_cdf":
-                model.channel_l1_cdf_prune(p=args.p)
-            else:
-                # original FedDST prune+grow maintains density
+            elif adjust_type == "mag":
                 model.adjust_mask_dict(gradients, t=round_idx, T_end=args.T_end, alpha=args.adjust_alpha)
                 model.apply_mask()
+            # else: mag_cdf, mag_grad_mag — no mask adjustment in mode 2
 
         for epoch in range(first_epochs, local_epochs):
             batch_loss = []
@@ -336,31 +333,31 @@ class MyModelTrainer(ModelTrainer):
             round_entry["l1_loss_count"] = len(l1_losses_epoch)
         # ──────────────────────────────────────────────────────
 
-        # ── mag_grad_mag CDF pruning (after all local epochs, not in middle) ──
-        if mode in [0, 3] and adjust_type == "mag_grad_mag" and not getattr(args, "local_refinement", False):
-            self.cdf_prune(p=args.p, adjustment_type="mag_grad_mag")
-            # ── 验证: mask=0 的位置权重也必须为 0 ──
-            _params = dict(model.named_parameters())
-            for _name in model.mask_dict:
-                if _name not in _params:
-                    continue
-                _mask = model.mask_dict[_name]
-                _zpos = (_mask == 0)
-                if _zpos.any():
-                    _w = _params[_name].data
-                    assert (_w[_zpos.to(_w.device, non_blocking=True)] == 0).all(), \
-                        f"[PRUNE_CHECK] {_name}: mask=0 but weight non-zero after cdf_prune!"
-            # ──────────────────────────────────────────────
+        # ── CDF pruning after training (cdf_pos=post-train: 训完再剪) ──
+        # Only runs in mode 0/3 (server sent a mask), never in adjustment-only mode 2
+        if getattr(args, "cdf_pos", "post-train") == "post-train" and mode in [0, 3]:
+            if adjust_type == "mag_grad_mag":
+                self.cdf_prune(p=args.p, adjustment_type="mag_grad_mag")
+                # ── 验证: mask=0 的位置权重也必须为 0 ──
+                _params = dict(model.named_parameters())
+                for _name in model.mask_dict:
+                    if _name not in _params:
+                        continue
+                    _mask = model.mask_dict[_name]
+                    _zpos = (_mask == 0)
+                    if _zpos.any():
+                        _w = _params[_name].data
+                        assert (_w[_zpos.to(_w.device, non_blocking=True)] == 0).all(), \
+                            f"[PRUNE_CHECK] {_name}: mask=0 but weight non-zero after cdf_prune!"
+                # ──────────────────────────────────────────────
+            elif adjust_type == "mag_cdf":
+                self.cdf_prune(p=args.p, adjustment_type=adjust_type)
+            # "mag": no post-training CDF pruning — original FedDST adjusts in mode 2 only
         # ──────────────────────────────────────────────────────────────────────
 
         # ── 保险: 返回前确保权重与 mask 同步 ──
         model.apply_mask()
         # ─────────────────────────────────────
-
-        # ── weight_archive: record trained positions after local round ──
-        if getattr(args, "weight_archive", False) and self.model.weight_archive is not None:
-            self.model.update_weight_archive(self.model.mask_dict)
-        # ───────────────────────────────────────────────────────────────
 
         return model.mask_dict
 

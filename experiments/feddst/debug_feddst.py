@@ -56,8 +56,8 @@ def add_args(parser):
     parser.add_argument("--reopen_gate_on_adjust", type=int, default=1, help="whether to reopen gated channels before adaptive epochs in adjustment rounds")
     parser.add_argument("--gate_reg_eps", type=float, default=1e-6, help="epsilon for numerical stability in gate-aware regularisation")
     parser.add_argument("--aggregate_gate", type=int, default=0, help="whether to log gate-guided sparsity statistics on server side")
-    parser.add_argument("--adjustment_type", type=str, default=None, choices=["mag", "mag_cdf", "mag_grad_mag", "channel_l1_cdf"],
-                        help="pruning strategy in adjustment rounds (default: original prune+grow). options: mag | mag_cdf | mag_grad_mag | channel_l1_cdf")
+    parser.add_argument("--adjustment_type", type=str, default=None, choices=["mag", "mag_cdf", "mag_grad_mag"],
+                        help="pruning strategy in adjustment rounds (default: original prune+grow). options: mag | mag_cdf | mag_grad_mag")
     parser.add_argument("--reg_mode", type=str, default="none",
                         choices=["none", "l1", "ns", "nard", "channel", "original",
                                  "gate_l1", "weight_l1_over_gate", "weight_l2_over_gate"],
@@ -67,10 +67,8 @@ def add_args(parser):
                              "| gate_l1/weight_l1_over_gate/weight_l2_over_gate (gated)")
     parser.add_argument("--reg_weight", type=float, default=0.0,
                         help="unified coefficient for the active regularization (0=disabled)")
-    parser.add_argument("--local_refinement", type=bool, default=False,
-                        help="client prunes mask on receive from server, skips prune/grow in mode 2")
-    parser.add_argument("--weight_archive", action="store_true", default=False,
-                        help="maintain dense weight archive for mag_grad_mag metric")
+    parser.add_argument("--cdf_pos", type=str, default="post-train", choices=["pre-train", "post-train"],
+                        help="when to apply CDF pruning: pre-train (prune then train) or post-train (train then prune)")
     parser.add_argument("--reg_adjust_only", action="store_true", default=True,
                         help="only compute regularization in adjustment rounds (mode 2/3)")
     parser.add_argument("--vd_ard_init", type=float, default=-10.0,

@@ -515,9 +515,9 @@ class SparseModel(nn.Module):
             if name in self.mask_dict:
                 weight.grad = weight.grad * self.mask_dict[name]
 
-    def forward(self, x, *args, apply_mask=True, **kargs):
-        if apply_mask:
-            self.apply_mask()
+    def forward(self, x, *args, **kargs):
+   
+        self.apply_mask()
         y = self.model(x, *args, **kargs)
         return y
 

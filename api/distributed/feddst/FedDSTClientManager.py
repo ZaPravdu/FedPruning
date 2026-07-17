@@ -51,10 +51,6 @@ class FedDSTClientManager(ClientManager):
         self.trainer.update_model(global_model_params)
         self.trainer.update_dataset(int(client_index))
 
-        # init weight_archive from server initial weights (dense)
-        if getattr(self.args, "weight_archive", False):
-            self.trainer.trainer.model.init_weight_archive()
-
         self.__train()
 
     def handle_message_receive_model_from_server(self, msg_params):
@@ -74,16 +70,6 @@ class FedDSTClientManager(ClientManager):
 
         self.trainer.update_model(model_params)
         self.trainer.update_dataset(int(client_index))
-
-        # update weight_archive at mask==1 positions with fresh server weights
-        if getattr(self.args, "weight_archive", False):
-            self.trainer.trainer.model.update_weight_archive(
-                self.trainer.trainer.model.mask_dict
-            )
-            # sync mask cache so next restore_revived_from_archive() compares correctly
-            self.trainer.trainer.model._prev_mask_dict = {
-                k: v.clone() for k, v in self.trainer.trainer.model.mask_dict.items()
-            }
 
         self.__train()
         if self.round_idx == self.num_rounds:
