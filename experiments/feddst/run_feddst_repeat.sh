@@ -2,9 +2,10 @@
 # Repeat an experiment N times with incrementing seed.
 #
 # Usage:
-#   ./run_feddst_repeat.sh [-r N] MODEL DATASET CLIENT_NUM WORKER_NUM ROUND EPOCH DENSITY LR [extra args...]
+#   ./run_feddst_repeat.sh [-r N] [-g GROUP] MODEL DATASET CLIENT_NUM WORKER_NUM ROUND EPOCH DENSITY LR [extra args...]
 #
 #   -r N       repeat count (default: 3)
+#   -g GROUP   W&B group name (optional; all repeats share this group)
 #   MODEL~LR   same positional args as run_feddst_distributed_pytorch.sh
 #   extra args appended verbatim (e.g. --top_p_aggregate --p 0.98)
 #
@@ -13,9 +14,10 @@
 set -e
 
 REPEAT=3
-while getopts "r:" opt; do
+while getopts "r:g:" opt; do
     case $opt in
         r) REPEAT=$OPTARG ;;
+        g) export WANDB_GROUP=$OPTARG ;;
         *) exit 1 ;;
     esac
 done

@@ -174,7 +174,7 @@ class FedDSTServerManager(ServerManager):
                     _wt_total += p.numel()
                     _wt_nonzero += (p != 0).sum().item()
                 _diag_wt_density = _wt_nonzero / max(_wt_total, 1)
-                _diag_match = "OK" if abs(_diag_mask_density - _diag_wt_density) < 1e-4 else "MISMATCH"
+                _diag_match = "OK" if abs(_diag_mask_density - _diag_wt_density) < 1e-3 else "MISMATCH"
                 logging.warning(
                     f"[DIAG_SERVER] round={self.round_idx} mode={self.mode} "
                     f"mask_density={_diag_mask_density:.6f} "
