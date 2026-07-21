@@ -159,13 +159,6 @@ def add_args(parser):
     )
 
     parser.add_argument(
-        "--reg_weight",
-        type=float,
-        default=0.0,
-        help="unified coefficient for the active regularization (0=disabled)",
-    )
-
-    parser.add_argument(
         "--vd_ard_init",
         type=float,
         default=-10.0,

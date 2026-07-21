@@ -65,8 +65,6 @@ def add_args(parser):
                              "| nard (norm-based ARD: 1/gamma^2 * ||w||^2 + log(gamma^2)) "
                              "| channel/original (VD) "
                              "| gate_l1/weight_l1_over_gate/weight_l2_over_gate (gated)")
-    parser.add_argument("--reg_weight", type=float, default=0.0,
-                        help="unified coefficient for the active regularization (0=disabled)")
     parser.add_argument("--cdf_pos", type=str, default="post-train", choices=["pre-train", "post-train"],
                         help="when to apply CDF pruning: pre-train (prune then train) or post-train (train then prune)")
     parser.add_argument("--reg_adjust_only", action="store_true", default=True,

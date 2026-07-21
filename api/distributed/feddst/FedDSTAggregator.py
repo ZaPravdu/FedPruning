@@ -39,7 +39,6 @@ class FedDSTAggregator(object):
                 "target_density": getattr(args, "target_density", None),
                 "p": getattr(args, "p", None),
                 "reg_mode": getattr(args, "reg_mode", None),
-                "reg_weight": getattr(args, "reg_weight", None),
                 "reg_adjust_only": getattr(args, "reg_adjust_only", False),
                 "cdf_pos": getattr(args, "cdf_pos", "post-train"),
                 "adjustment_type": getattr(args, "adjustment_type", None),

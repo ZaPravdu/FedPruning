@@ -22,14 +22,12 @@ class MyModelTrainer(ModelTrainer):
                 "target_density": getattr(args, "target_density", None),
                 "p": getattr(args, "p", None),
                 "reg_mode": getattr(args, "reg_mode", None),
-                "reg_weight": getattr(args, "reg_weight", None),
                 "reg_adjust_only": getattr(args, "reg_adjust_only", False),
                 "cdf_pos": getattr(args, "cdf_pos", "post-train"),
                 "adjustment_type": getattr(args, "adjustment_type", None),
                 "client_optimizer": getattr(args, "client_optimizer", ""),
                 "lr": getattr(args, "lr", None),
             },
-            "l1_losses": [],
         }
 
     def get_model(self):
@@ -154,16 +152,10 @@ class MyModelTrainer(ModelTrainer):
         model.train()
         self._train_data = train_data
 
-        # auto-disable weight decay when L1 regularization is active
-        if getattr(args, "reg_mode", "") == "l1" and getattr(args, "reg_weight", 0.0) > 0:
-            logging.warning("L1 reg active: forcing weight decay to 0")
-            args.wd = 0.0
-
         # train and update
         criterion = nn.CrossEntropyLoss().to(device)
         trainable_params = [param for param in self.model.parameters() if param.requires_grad]
         assert trainable_params, "no trainable parameters found for optimizer"
-        # verify weight decay is 0 when L1 is active
 
         if args.client_optimizer == "sgd":
             optimizer = torch.optim.SGD(trainable_params, lr=args.lr)
@@ -171,7 +163,6 @@ class MyModelTrainer(ModelTrainer):
             optimizer = torch.optim.Adam(trainable_params, lr=args.lr, weight_decay=args.wd, amsgrad=True)
 
         epoch_loss = []
-        l1_losses_epoch = []  # diagnostic: track L1 loss per step
 
         if mode in [2, 3]:
             local_epochs = args.adjustment_epochs if args.adjustment_epochs is not None else args.epochs
@@ -245,10 +236,6 @@ class MyModelTrainer(ModelTrainer):
                 model.zero_grad()
                 log_probs = model(x)
                 loss = criterion(log_probs, labels)
-                if round_idx is not None and 50 <= round_idx <= args.T_end and (not args.reg_adjust_only or mode in (2, 3)):
-                    loss_ce = loss.item()
-                    loss = self._add_reg(args, loss)
-                    l1_losses_epoch.append(loss.item() - loss_ce)
                 loss.backward()
                 #self.model.apply_mask_gradients()  # apply pruning mask
 
@@ -308,29 +295,11 @@ class MyModelTrainer(ModelTrainer):
                 model.zero_grad()
                 log_probs = model(x)
                 loss = criterion(log_probs, labels)
-                if round_idx is not None and 50 <= round_idx <= args.T_end and not args.reg_adjust_only:
-                    loss_ce = loss.item()
-                    loss = self._add_reg(args, loss)
-                    l1_losses_epoch.append(loss.item() - loss_ce)
                 loss.backward()
                 optimizer.step()
                 batch_loss.append(loss.item())
             epoch_loss.append(sum(batch_loss) / len(batch_loss))
             logging.info('Client Index = {}\tEpoch: {}\tLoss: {:.6f}'.format(self.id, epoch, sum(epoch_loss) / len(epoch_loss)))
-
-        # ── diagnostic: store L1 loss average for this round ──
-        if l1_losses_epoch:
-            l1_avg = sum(l1_losses_epoch) / len(l1_losses_epoch)
-            # attach to the most recent round entry if it exists, otherwise create a round entry
-            round_entry = None
-            if self.diagnostics["rounds"] and self.diagnostics["rounds"][-1]["round"] == round_idx:
-                round_entry = self.diagnostics["rounds"][-1]
-            else:
-                round_entry = {"round": round_idx, "mode": mode}
-                self.diagnostics["rounds"].append(round_entry)
-            round_entry["l1_loss_avg"] = l1_avg
-            round_entry["l1_loss_count"] = len(l1_losses_epoch)
-        # ──────────────────────────────────────────────────────
 
         # ── CDF pruning after training (cdf_pos=post-train: 训完再剪) ──
         # Only runs in mode 0/3 (server sent a mask), never in adjustment-only mode 2
