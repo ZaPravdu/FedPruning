@@ -115,8 +115,6 @@ def cdf_prune_by_metric(metric, mask, p=0.85, min_keep=None, use_mask=True):
     Returns:
         new_mask: binary mask tensor
     """
-    if metric is None:
-        return mask.clone()
 
     assert 0.0 < p <= 1.0
     flat_metric = metric.view(-1)
@@ -138,8 +136,6 @@ def cdf_prune_by_metric(metric, mask, p=0.85, min_keep=None, use_mask=True):
 
     sorted_vals, idx = torch.sort(selected_metric, descending=True)
     total = sorted_vals.sum()
-    if total == 0:
-        return mask.clone()
 
     cumsum = torch.cumsum(sorted_vals, dim=0)
     keep_count = int((cumsum < p * total).sum().item()) + 1

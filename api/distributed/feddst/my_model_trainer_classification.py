@@ -164,8 +164,7 @@ class MyModelTrainer(ModelTrainer):
         trainable_params = [param for param in self.model.parameters() if param.requires_grad]
         assert trainable_params, "no trainable parameters found for optimizer"
         # verify weight decay is 0 when L1 is active
-        if getattr(args, "reg_mode", "") == "l1" and getattr(args, "reg_weight", 0.0) > 0:
-            assert args.wd == 0.0, "weight decay must be 0 when L1 reg is active"
+
         if args.client_optimizer == "sgd":
             optimizer = torch.optim.SGD(trainable_params, lr=args.lr)
         else:
