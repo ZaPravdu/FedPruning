@@ -21,8 +21,6 @@ class MyModelTrainer(ModelTrainer):
                 "init_density": getattr(args, "init_density", None),
                 "target_density": getattr(args, "target_density", None),
                 "p": getattr(args, "p", None),
-                "reg_mode": getattr(args, "reg_mode", None),
-                "reg_adjust_only": getattr(args, "reg_adjust_only", False),
                 "cdf_pos": getattr(args, "cdf_pos", "post-train"),
                 "adjustment_type": getattr(args, "adjustment_type", None),
                 "client_optimizer": getattr(args, "client_optimizer", ""),
@@ -52,12 +50,6 @@ class MyModelTrainer(ModelTrainer):
             loss = loss + reg_w * self.model.compute_ns_regularization()
         elif reg_m == "nard":
             loss = loss + reg_w * self.model.compute_nard_regularization()
-        elif reg_m in ("gate_l1", "weight_l1_over_gate", "weight_l2_over_gate"):
-            g = self.model.compute_regularization(reg_type=reg_m, eps=getattr(args, "gate_reg_eps", 1e-6))
-            assert g is not None, f"compute_regularization returned None for reg_type={reg_m}"
-            loss = loss + reg_w * g
-        elif reg_m in ("channel", "original"):
-            loss = loss + reg_w * self.model.compute_vd_regularization()
         return loss
 
     # ── CDF pruning (moved from SparseModel.general_cdf_prune) ──
@@ -175,10 +167,6 @@ class MyModelTrainer(ModelTrainer):
         else:
             first_epochs = local_epochs
 
-        if mode in [2, 3] and getattr(args, "model", "") == "gated_resnet18":
-            if getattr(args, "reopen_gate_on_adjust", 1) and model.has_gated_convs():
-                model.reopen_gated_channels()
-
         # ── 预训练 CDF 剪枝 (cdf_pos=pre-train: 收到 mask 后先剪再训) ──
         adjust_type = getattr(args, "adjustment_type", None)
         if getattr(args, "cdf_pos", "post-train") == "pre-train" and mode in [0, 3] and adjust_type:
@@ -282,9 +270,7 @@ class MyModelTrainer(ModelTrainer):
             #   "mag_cdf" etc.   → no-op: CDF pruning only when server sent a mask (mode 0/3)
             #   pre-train CDF    → no-op (already CDF-pruned on mask receipt)
             
-            if model.has_gated_convs():
-                model.prune_by_gate_cdf(p=args.p)
-            elif adjust_type == "mag":
+            if adjust_type == "mag":
                 model.adjust_mask_dict(gradients, t=round_idx, T_end=args.T_end, alpha=args.adjust_alpha)
                 model.apply_mask()
             # else: mag_cdf, mag_grad_mag — no mask adjustment in mode 2

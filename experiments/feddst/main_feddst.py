@@ -98,12 +98,6 @@ def add_args(parser):
     )
 
     parser.add_argument(
-        "--reg_adjust_only",
-        action="store_true",
-        help="only compute regularization in adjustment rounds (mode 2/3)",
-    )
-
-    parser.add_argument(
         "--p",
         type=float,
         default=0.85,
@@ -123,18 +117,6 @@ def add_args(parser):
         default=None,
         choices=["mag", "mag_cdf", "mag_grad_mag"],
         help="pruning strategy in adjustment rounds (default: None = original FedDST prune+grow). options: mag | mag_cdf | mag_grad_mag",
-    )
-
-    parser.add_argument(
-        "--reg_mode",
-        type=str,
-        default="none",
-        choices=["none", "l1", "ns", "nard", "channel", "original",
-                 "gate_l1", "weight_l1_over_gate", "weight_l2_over_gate"],
-        help="regularization mode: none | l1 (standard) | ns (network slimming on BN gamma L1) "
-             "| nard (norm-based ARD: 1/gamma^2 * ||w||^2 + log(gamma^2)) "
-             "| channel/original (VD) "
-             "| gate_l1/weight_l1_over_gate/weight_l2_over_gate (gated)",
     )
 
     parser.add_argument("--epochs", type=int, default=5, metavar="EP", help="how many epochs will be trained locally")

@@ -38,8 +38,6 @@ class FedDSTAggregator(object):
                 "init_density": getattr(args, "init_density", None),
                 "target_density": getattr(args, "target_density", None),
                 "p": getattr(args, "p", None),
-                "reg_mode": getattr(args, "reg_mode", None),
-                "reg_adjust_only": getattr(args, "reg_adjust_only", False),
                 "cdf_pos": getattr(args, "cdf_pos", "post-train"),
                 "adjustment_type": getattr(args, "adjustment_type", None),
                 "client_optimizer": getattr(args, "client_optimizer", ""),
@@ -222,35 +220,4 @@ class FedDSTAggregator(object):
         model = self.trainer.model
         post_density = model.compute_gate_guided_density()
         wandb.log({"Density/PostAggregation_server": post_density, "round": round_idx})
-
-        # VD statistics
-        if model.has_vd_convs():
-            vd_kl = model.compute_vd_regularization()
-            log_sigmas = torch.cat([
-                m.log_sigma2.flatten() for _, m in model.model.named_modules()
-                if hasattr(m, 'log_sigma2')
-            ])
-            W = torch.cat([
-                m.conv.weight.flatten() for _, m in model.model.named_modules()
-                if hasattr(m, 'log_sigma2')
-            ])
-            log_alphas = torch.cat([
-                m._clip(m.log_sigma2 - torch.log(m.conv.weight ** 2 + 1e-8)).flatten()
-                for _, m in model.model.named_modules()
-                if hasattr(m, 'log_sigma2')
-            ])
-            metrics = {
-                "VD/kl_loss": vd_kl.item() if vd_kl is not None else 0.0,
-                "VD/log_sigma2_mean": log_sigmas.mean().item(),
-                "VD/log_sigma2_min": log_sigmas.min().item(),
-                "VD/log_sigma2_max": log_sigmas.max().item(),
-                "VD/log_alpha_mean": log_alphas.mean().item(),
-                "VD/log_alpha_min": log_alphas.min().item(),
-                "VD/log_alpha_max": log_alphas.max().item(),
-                "round": round_idx,
-            }
-            # original mode: log effective density from VD eval pruning
-            if model.has_vd_original_mode():
-                metrics["Density/VD_effective"] = model.compute_vd_density()
-            wandb.log(metrics)
 
