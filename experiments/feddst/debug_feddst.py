@@ -78,6 +78,14 @@ def add_args(parser):
                         help="the number of data samples used for parameter growth, option are [ 'random', 'single', 'batch', 'entire']")
     parser.add_argument("--is_mobile", type=int, default=0,
                         help="whether to transform tensor to list for mobile deployment (default: 0)")
+    parser.add_argument('--init_density', type=float, default=None,
+        help='ERK initialization density (default: equals target_density)')
+    parser.add_argument(
+        "--top_p_aggregate",
+        action="store_true",
+        default=False,
+        help="server aggregates masks by vote frequency CDF top-p instead of OR + magnitude re-prune",
+    )
     return parser.parse_args()
 
 
