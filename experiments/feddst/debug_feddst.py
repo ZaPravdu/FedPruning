@@ -229,7 +229,7 @@ def main():
     ) = dataset
 
     inner_model = create_model(args, model_name=args.model, output_dim=class_num)
-    model = SparseModel(inner_model, target_density=args.target_density, strategy=args.pruning_strategy)
+    model = SparseModel(inner_model, target_density=args.target_density, init_density=args.init_density, strategy=args.pruning_strategy)
     model.to(device)
 
     if args.dataset in ["tinystories"]:
