@@ -21,7 +21,7 @@ from api.data_preprocessing.tinyimagenet.data_loader import load_partition_data_
 
 from api.model.cv.resnet_gn import resnet18 as resnet18_gn
 from api.model.cv.mobilenet import mobilenet
-from api.model.cv.resnet import add_gate_to_conv, add_vd_to_conv, resnet18, resnet56
+from api.model.cv.resnet import resnet18, resnet56
 from api.model.nlp.gpt2 import GPT2Model, GPT2Config
 from torchvision.models import mobilenet_v3_small as MobileNetV3
 from torchvision.models import efficientnet_v2_s as EfficientNetV2
@@ -41,7 +41,7 @@ from api.pruning.init_scheme import pruning
 
 def add_args(parser):
     parser.add_argument("--model", type=str, default="resnet56", metavar="N",
-                        help="neural network used in training, e.g. resnet18, gated_resnet18, resnet56")
+                        help="neural network used in training, e.g. resnet18, resnet56")
     parser.add_argument("--dataset", type=str, default="cifar10", metavar="N", help="dataset used for training")
     parser.add_argument("--dataset_ratio", type=float, default=0.05, metavar="PA",
                         help="the ratio of subset for the total dataset (default: 0.05). Only appliable for [tinystories, ]")
@@ -53,9 +53,6 @@ def add_args(parser):
     parser.add_argument("--num_eval", type=int, default=128, help="the number of data samples used for eval")
     parser.add_argument('--lr', type=float, default=0.001, metavar='LR', help='learning rate')
     parser.add_argument("--p", type=float, default=0.85, help="CDF top-p ratio for pruning (was --gate_p)")
-    parser.add_argument("--reopen_gate_on_adjust", type=int, default=1, help="whether to reopen gated channels before adaptive epochs in adjustment rounds")
-    parser.add_argument("--gate_reg_eps", type=float, default=1e-6, help="epsilon for numerical stability in gate-aware regularisation")
-    parser.add_argument("--aggregate_gate", type=int, default=0, help="whether to log gate-guided sparsity statistics on server side")
     parser.add_argument("--adjustment_type", type=str, default=None, choices=["mag", "mag_cdf", "mag_grad_mag"],
                         help="pruning strategy in adjustment rounds (default: original prune+grow). options: mag | mag_cdf | mag_grad_mag")
     parser.add_argument("--reg_mode", type=str, default="none",
@@ -69,13 +66,6 @@ def add_args(parser):
                         help="when to apply CDF pruning: pre-train (prune then train) or post-train (train then prune)")
     parser.add_argument("--reg_adjust_only", action="store_true", default=True,
                         help="only compute regularization in adjustment rounds (mode 2/3)")
-    parser.add_argument("--vd_ard_init", type=float, default=-10.0,
-                        help="initial log_alpha value for variational dropout")
-    parser.add_argument("--vd_thresh", type=float, default=3.0,
-                        help="log_alpha pruning threshold (only used in 'original' mode, default 3)")
-    parser.add_argument("--vd_train_clip", type=int, default=0,
-                        help="zero weights with log_alpha >= thresh during training "
-                             "(only used in 'original' mode, default 0)")
     parser.add_argument("--epochs", type=int, default=1, metavar="EP", help="local epochs")
     parser.add_argument("--A_epochs", type=int, default=1, metavar="EP",
                         help="how many epochs will be trained before pruning and growing; default uses half of local epochs in adjustment rounds")
@@ -140,13 +130,6 @@ def create_model(args, model_name, output_dim):
         model = resnet18_gn(num_classes=output_dim)
     elif model_name == "resnet18":
         model = resnet18(class_num=output_dim)
-    elif model_name == "gated_resnet18":
-        model = resnet18(class_num=output_dim)
-        add_gate_to_conv(model)
-    elif model_name == "vd_resnet18":
-        model = resnet18(class_num=output_dim)
-        add_vd_to_conv(model, ard_init=args.vd_ard_init, mode=args.reg_mode,
-                        thresh=args.vd_thresh, train_clip=bool(args.vd_train_clip))
     elif model_name == "resnet56":
         model = resnet56(class_num=output_dim)
     elif model_name == "mobilenet":

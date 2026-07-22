@@ -253,6 +253,8 @@ class MyModelTrainer(ModelTrainer):
 
         if mode in [2, 3]:
             model.zero_grad()
+            if getattr(args, "cdf_pos", "post-train") == "pre-train":
+                pass
             if args.growth_data_mode == "random":
                 gradients = {name: torch.randn_like(param, device='cpu').clone() for name, param in model.named_parameters() if param.requires_grad}
 
@@ -279,9 +281,8 @@ class MyModelTrainer(ModelTrainer):
             #   "mag"            → original FedDST prune+grow (density-maintaining)
             #   "mag_cdf" etc.   → no-op: CDF pruning only when server sent a mask (mode 0/3)
             #   pre-train CDF    → no-op (already CDF-pruned on mask receipt)
-            if getattr(args, "cdf_pos", "post-train") == "pre-train":
-                pass
-            elif model.has_gated_convs():
+            
+            if model.has_gated_convs():
                 model.prune_by_gate_cdf(p=args.p)
             elif adjust_type == "mag":
                 model.adjust_mask_dict(gradients, t=round_idx, T_end=args.T_end, alpha=args.adjust_alpha)
