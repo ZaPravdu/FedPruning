@@ -5,7 +5,7 @@ import sys
 
 from .message_define import MyMessage
 from .utils import transform_tensor_to_list, post_complete_message_to_sweep_process
-from api.pruning.init_scheme import cubic_density_schedule, generate_layer_density_dict, pruning, cdf_prune_by_metric
+from api.pruning.init_scheme import pruning, cdf_prune_by_metric
 import torch
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.getcwd(), "../../../")))
@@ -92,15 +92,9 @@ class FedDSTServerManager(ServerManager):
             global_model_params = self.aggregator.aggregate()
             logging.info(f"current mode for server is {self.mode}, the round is {self.round_idx}")
             if self.mode in [2, 3]:
-                logging.info(f"[SCHED_CHECK] density_scheduler={self.args.density_scheduler} type={type(self.args.density_scheduler)} "
-                             f"target_density={self.args.target_density} strategy={self.args.pruning_strategy}")
                 model = self.aggregator.trainer.model
 
-                # ── top_p_aggregate: frequency-based CDF top p (ignores density scheduler) ──
                 if getattr(self.args, "top_p_aggregate", False):
-                    if self.args.density_scheduler is not None:
-                        logging.warning("[TOP_P_AGGREGATE] density_scheduler set but ignored — "
-                                        "top_p_aggregate does not target a specific density")
                     candidate = self.aggregator.aggregate_mask()
                     freq_dict = self.aggregator.aggregate_mask_frequency()
                     for k in candidate.keys():
@@ -116,24 +110,6 @@ class FedDSTServerManager(ServerManager):
                     logging.info(f"[TOP_P_AGGREGATE] round={self.round_idx} p={self.args.p}")
 
                 else:
-                    # ── original aggregation ──
-                    # density scheduler: update current_density / current_layer_density_dict
-                    if self.args.density_scheduler is not None:
-                        start_density = self.args.init_density if self.args.init_density is not None else self.args.target_density
-                        new_current_density = cubic_density_schedule(
-                            self.round_idx, self.args.density_scheduler[1],
-                            start_density, self.args.density_scheduler[0],
-                        )
-                        layer_density_strategy, _ = model.strategy.split("_")
-                        model.current_density = new_current_density
-                        model.current_layer_density_dict = generate_layer_density_dict(
-                            model.layer_shape_dict, model.num_overall_elements,
-                            model.sparse_layer_set, new_current_density, layer_density_strategy,
-                        )
-                        logging.info(f"[DENSITY_SCHED] round={self.round_idx} target={new_current_density:.4f} "
-                                     f"dense_ratio={model.num_overall_elements:.0f} "
-                                     f"layer_densities={ {k: f'{v:.3f}' for k, v in model.current_layer_density_dict.items()} }")
-
                     global_mask = self.aggregator.aggregate_mask()
                     # ── diagnostic: OR mask density ──
                     if global_mask:
@@ -145,13 +121,10 @@ class FedDSTServerManager(ServerManager):
                             "n_clients": len([k for k in self.aggregator.mask_dict if k is not None]),
                         })
                     # ─────────────────────────────────
-                    # CDF lock: skip density reset, use aggregated mask as-is
-                    # (layer_density_dict floor is always present since v2 refactor)
                     if getattr(self.args, "adjustment_type", None) is not None:
                         model.mask_dict = global_mask
                         logging.info("[CDF_LOCK] skipping density reset, using aggregated mask")
                     else:
-                        # prune to reach density (always resets to current density)
                         layer_density_strategy, pruning_strategy = model.strategy.split("_")
                         new_global_mask = pruning(model, model.current_layer_density_dict, pruning_strategy, mask_dict=global_mask)
                         model.mask_dict = new_global_mask
@@ -185,7 +158,7 @@ class FedDSTServerManager(ServerManager):
                 # ────────────────────────────────────────────────────────
 
             # ── diagnostic: server density before logging ──
-            server_d = self.aggregator.trainer.model.compute_gate_guided_density()
+            server_d = self.aggregator.trainer.model.compute_density()
             self.aggregator.diagnostics["server_densities"].append({
                 "round": self.round_idx,
                 "mode": self.mode,

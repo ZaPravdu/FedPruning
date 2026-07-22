@@ -195,7 +195,7 @@ def run_single_client(client_id, args, model, train_data_local_dict,
 
     weights, masks, local_sample_num = trainer.train(mode, round_idx)
 
-    density = local_model.compute_gate_guided_density()
+    density = local_model.compute_density()
 
     return weights, masks, local_sample_num, density
 

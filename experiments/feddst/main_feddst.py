@@ -150,15 +150,6 @@ def add_args(parser):
 
     parser.add_argument("--adjustment_epochs", type=int, default=None, help=" the number of local apoches used in model adjustment round, if it is set None, it is equal to the number of epoches for training round" )
 
-    parser.add_argument(
-        "--density_scheduler",
-        type=float,
-        nargs=2,
-        default=None,
-        metavar=("FINAL_DENSITY", "SCHEDULE_ROUNDS"),
-        help="cubic density schedule: init_density -> FINAL_DENSITY over SCHEDULE_ROUNDS rounds",
-    )
-
     # Following arguments are seldom changed
     parser.add_argument(
         "--gpu_mapping_key", type=str, default="mapping_default", help="the key in gpu utilization file"

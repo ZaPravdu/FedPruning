@@ -81,7 +81,7 @@ class FedDSTAggregator(object):
         wandb.log({"Density/ClientLocal_avg": avg, "round": round_idx})
 
     def log_communication_cost(self, round_idx, num_clients):
-        server_density = self.trainer.model.compute_gate_guided_density()
+        server_density = self.trainer.model.compute_density()
         mean_client_density = getattr(self, 'last_mean_client_density', 0.0)
         round_cost = (server_density + mean_client_density) * num_clients
         self.comm_cumulative_cost += round_cost
@@ -218,6 +218,6 @@ class FedDSTAggregator(object):
 
     def log_sparsity_statistics(self, round_idx):
         model = self.trainer.model
-        post_density = model.compute_gate_guided_density()
+        post_density = model.compute_density()
         wandb.log({"Density/PostAggregation_server": post_density, "round": round_idx})
 

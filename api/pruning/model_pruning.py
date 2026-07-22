@@ -316,38 +316,15 @@ class SparseModel(nn.Module):
         return total_reg
 
     @torch.no_grad()
-    def compute_gate_guided_density(self):
-        # collect gated conv weight names for gate-aware counting
-        gated_weight_names = set()
-        gate_masks = {}
-        for name, module in iter_gated_convs(self.model):
-            wn = f"{name}.conv.weight"
-            gated_weight_names.add(wn)
-            gate_masks[wn] = (module.gate != 0).bool()
-
+    def compute_density(self):
         num_remain_elements = 0
         total_elements = 0
         for name, weight in self.model.named_parameters():
             total_elements += weight.numel()
-            if name in gated_weight_names:
-                # gate-aware: count elements where BOTH pruning mask AND gate are 1
-                if name in self.mask_dict:
-                    effective = self.mask_dict[name].clone()
-                    effective[~gate_masks[name]] = 0.0
-                    num_remain_elements += (effective != 0.0).sum().item()
-                else:
-                    num_remain_elements += weight[gate_masks[name]].numel()
+            if name in self.mask_dict:
+                num_remain_elements += (self.mask_dict[name] != 0.0).sum().item()
             else:
-                # use mask_dict for masked params (weight != 0 can be wrong due to momentum
-                # filling in zeroed weights after optimizer.step()); fall back to weight
-                # values for non-masked params (bias, BN, etc.)
-                if name in self.mask_dict:
-                    num_remain_elements += (self.mask_dict[name] != 0.0).sum().item()
-                else:
-                    num_remain_elements += torch.sum(weight != 0.).item()
-
-        if total_elements == 0:
-            return 0.0
+                num_remain_elements += weight.numel()
         return num_remain_elements / total_elements
 
     @torch.no_grad()

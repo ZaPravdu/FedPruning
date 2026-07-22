@@ -323,7 +323,7 @@ class MyModelTrainer(ModelTrainer):
         model.eval()
 
         # ── DIAG: 记录 test 前模型的 mask 密度 ──
-        pre_test_mask_density = model.compute_gate_guided_density()
+        pre_test_mask_density = model.compute_density()
         # ──────────────────────────────────────
 
         metrics = {
@@ -352,7 +352,7 @@ class MyModelTrainer(ModelTrainer):
                         total_el += p.numel()
                         nonzero_el += (p != 0).sum().item()
                     actual_density = nonzero_el / max(total_el, 1)
-                    post_forward_mask_density = model.compute_gate_guided_density()
+                    post_forward_mask_density = model.compute_density()
                     match = "OK" if abs(actual_density - post_forward_mask_density) < 1e-4 else "MISMATCH"
                     logging.warning(
                         f"[DIAG_TEST] actual_density={actual_density:.6f} "

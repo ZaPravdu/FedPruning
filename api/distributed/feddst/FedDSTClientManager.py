@@ -100,7 +100,7 @@ class FedDSTClientManager(ClientManager):
     def __train(self):
         logging.info("#######training########### round_id = %d" % self.round_idx)
         weights, masks, local_sample_num = self.trainer.train(mode = self.mode, round_idx=self.round_idx, )
-        self._last_density = self.trainer.trainer.model.compute_gate_guided_density()
+        self._last_density = self.trainer.trainer.model.compute_density()
         if self.mode in [2, 3]:
             self.send_model_to_server(0, weights, local_sample_num, self._last_density, masks)
         else:
