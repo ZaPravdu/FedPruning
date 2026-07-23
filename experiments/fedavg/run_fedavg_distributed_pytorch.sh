@@ -16,7 +16,10 @@ echo $PROCESS_NUM
 
 hostname > mpi_host_file
 
-mpirun -np $PROCESS_NUM -hostfile ./mpi_host_file python3 ./main_fedavg.py \
+# Shift positional args, leaving only optional extras in "$@"
+shift 10
+
+command="mpirun -np $PROCESS_NUM -hostfile ./mpi_host_file python3 ./main_fedavg.py \
   --gpu_mapping_file "gpu_mapping.yaml" \
   --gpu_mapping_key "mapping_default" \
   --client_num_in_total $CLIENT_NUM \
@@ -28,5 +31,10 @@ mpirun -np $PROCESS_NUM -hostfile ./mpi_host_file python3 ./main_fedavg.py \
   --initial_lr $LR \
   --dataset $DATASET \
   --partition_alpha $PARTITION_ALPHA \
-  --frequency_of_the_test $FREQ \
-  "$@"
+  --frequency_of_the_test $FREQ"
+
+for arg in "$@"; do
+  command="$command $arg"
+done
+
+eval $command
