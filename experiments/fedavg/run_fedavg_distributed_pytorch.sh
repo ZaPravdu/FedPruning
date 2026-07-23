@@ -27,5 +27,6 @@ mpirun -np $PROCESS_NUM -hostfile ./mpi_host_file python3 ./main_fedavg.py \
   --batch_size $BATCH_SIZE \
   --initial_lr $LR \
   --dataset $DATASET \
-  --partition_alpha $PARTITION_ALPHA  \
+  --partition_alpha $PARTITION_ALPHA \
   --frequency_of_the_test $FREQ \
+  "$@"
