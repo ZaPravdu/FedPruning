@@ -87,7 +87,14 @@ def add_args(parser):
         "--num_eval", type=int, default=128, help="the number of the data samples used for eval, -1 is the total testing dataset."
     )
     parser.add_argument('--lr', type=float, default=0.001, metavar='LR',
-                        help='learning rate (default: 0.001)')
+                        help='learning rate (default: 0.001); acts as initial_lr when --final_lr is set')
+
+    parser.add_argument(
+        "--final_lr",
+        type=float,
+        default=None,
+        help="final LR for cosine annealing across rounds (default: None = no decay)",
+    )
 
     parser.add_argument(
         "--cdf_pos",

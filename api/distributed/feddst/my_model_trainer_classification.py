@@ -1,5 +1,6 @@
 import json
 import logging
+import math
 import os
 
 import torch
@@ -146,13 +147,27 @@ class MyModelTrainer(ModelTrainer):
 
         # train and update
         criterion = nn.CrossEntropyLoss().to(device)
+
+        # ── Cosine annealing LR across rounds ──
+        current_lr = args.lr
+        final_lr = getattr(args, "final_lr", None)
+        T_max = getattr(args, "comm_round", None)
+        if final_lr is not None and round_idx is not None and T_max is not None and T_max > 0:
+            if round_idx >= T_max:
+                current_lr = final_lr
+            else:
+                cos = math.cos(math.pi * round_idx / T_max)
+                current_lr = final_lr + 0.5 * (args.lr - final_lr) * (1 + cos)
+            logging.info(f"[LR_SCHED] round={round_idx} lr={current_lr:.6f} (init={args.lr}, final={final_lr}, T_max={T_max})")
+        # ────────────────────────────────────────
+
         trainable_params = [param for param in self.model.parameters() if param.requires_grad]
         assert trainable_params, "no trainable parameters found for optimizer"
 
         if args.client_optimizer == "sgd":
-            optimizer = torch.optim.SGD(trainable_params, lr=args.lr)
+            optimizer = torch.optim.SGD(trainable_params, lr=current_lr)
         else:
-            optimizer = torch.optim.Adam(trainable_params, lr=args.lr, weight_decay=args.wd, amsgrad=True)
+            optimizer = torch.optim.Adam(trainable_params, lr=current_lr, weight_decay=args.wd, amsgrad=True)
 
         epoch_loss = []
 

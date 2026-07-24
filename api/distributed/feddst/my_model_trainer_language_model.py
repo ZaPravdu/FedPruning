@@ -1,4 +1,5 @@
 import logging
+import math
 
 import torch
 from torch import nn
@@ -38,10 +39,23 @@ class MyModelTrainer(ModelTrainer):
         model.train()
 
         # train and update
+        # ── Cosine annealing LR across rounds ──
+        current_lr = args.lr
+        final_lr = getattr(args, "final_lr", None)
+        T_max = getattr(args, "comm_round", None)
+        if final_lr is not None and round_idx is not None and T_max is not None and T_max > 0:
+            if round_idx >= T_max:
+                current_lr = final_lr
+            else:
+                cos = math.cos(math.pi * round_idx / T_max)
+                current_lr = final_lr + 0.5 * (args.lr - final_lr) * (1 + cos)
+            logging.info(f"[LR_SCHED] round={round_idx} lr={current_lr:.6f} (init={args.lr}, final={final_lr}, T_max={T_max})")
+        # ────────────────────────────────────────
+
         if args.client_optimizer == "sgd":
-            optimizer = torch.optim.SGD(filter(lambda p: p.requires_grad, self.model.parameters()), lr=args.lr)
+            optimizer = torch.optim.SGD(filter(lambda p: p.requires_grad, self.model.parameters()), lr=current_lr)
         else:
-            optimizer = torch.optim.Adam(filter(lambda p: p.requires_grad, self.model.parameters()), lr=args.lr, weight_decay=args.wd, amsgrad=True)
+            optimizer = torch.optim.Adam(filter(lambda p: p.requires_grad, self.model.parameters()), lr=current_lr, weight_decay=args.wd, amsgrad=True)
 
         if mode in [2, 3]:
             local_epochs = args.adjustment_epochs if args.adjustment_epochs is not None else args.epochs

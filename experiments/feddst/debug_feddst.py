@@ -51,7 +51,8 @@ def add_args(parser):
     parser.add_argument("--batch_size", type=int, default=64, metavar="N", help="input batch size for training")
     parser.add_argument("--nlp_hidden_size", type=int, default=256, metavar="N", help="the hidden size for nlp model")
     parser.add_argument("--num_eval", type=int, default=128, help="the number of data samples used for eval")
-    parser.add_argument('--lr', type=float, default=0.001, metavar='LR', help='learning rate')
+    parser.add_argument('--lr', type=float, default=0.001, metavar='LR', help='learning rate; acts as initial_lr when --final_lr is set')
+    parser.add_argument("--final_lr", type=float, default=None, help="final LR for cosine annealing (default: None = no decay)")
     parser.add_argument("--p", type=float, default=0.85, help="CDF top-p ratio for pruning (was --gate_p)")
     parser.add_argument("--adjustment_type", type=str, default=None, choices=["mag", "mag_cdf", "mag_grad_mag"],
                         help="pruning strategy in adjustment rounds (default: original prune+grow). options: mag | mag_cdf | mag_grad_mag")
