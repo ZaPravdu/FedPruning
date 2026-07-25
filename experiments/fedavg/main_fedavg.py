@@ -80,8 +80,8 @@ def add_args(parser):
     parser.add_argument('--initial_lr', type=float, default=0.1, metavar='LR',
                         help='learning rate (default: 0.1)')
     
-    parser.add_argument('--final_lr', type=float, default=0.01, metavar='LR',
-                        help='learning rate (default: 0.01)')
+    parser.add_argument('--final_lr', type=float, default=None, metavar='LR',
+                        help='final LR for cosine annealing (default: None = no decay)')
 
     parser.add_argument("--epochs", type=int, default=5, metavar="EP", help="how many epochs will be trained locally")
 

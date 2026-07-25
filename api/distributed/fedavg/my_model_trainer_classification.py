@@ -24,20 +24,27 @@ class MyModelTrainer(ModelTrainer):
 
         # train and update
         criterion = nn.CrossEntropyLoss().to(device)
+
+        # ── Cosine annealing LR across rounds ──
+        current_lr = args.initial_lr
+        round_idx = getattr(args, "round_idx", None)
+        if args.final_lr is not None and round_idx is not None and args.comm_round > 0:
+            if round_idx >= args.comm_round:
+                current_lr = args.final_lr
+            else:
+                cos = math.cos(math.pi * round_idx / args.comm_round)
+                current_lr = args.final_lr + 0.5 * (args.initial_lr - args.final_lr) * (1 + cos)
+            logging.info(f"[LR_SCHED] round={round_idx} lr={current_lr:.6f} (init={args.initial_lr}, final={args.final_lr}, T_max={args.comm_round})")
+        # ────────────────────────────────────────
+
         if args.client_optimizer == "sgd":
-            optimizer = torch.optim.SGD(filter(lambda p: p.requires_grad, self.model.parameters()), lr=args.initial_lr)
+            optimizer = torch.optim.SGD(filter(lambda p: p.requires_grad, self.model.parameters()), lr=current_lr)
         else:
-            optimizer = torch.optim.Adam(filter(lambda p: p.requires_grad, self.model.parameters()), lr=args.initial_lr,
+            optimizer = torch.optim.Adam(filter(lambda p: p.requires_grad, self.model.parameters()), lr=current_lr,
                                          weight_decay=args.wd, amsgrad=True)
-        initial_lr = args.initial_lr
-        final_lr = args.final_lr
 
         epoch_loss = []
         for epoch in range(args.epochs):
-            # Calculate the decayed learning rate
-            # current_lr = initial_lr * math.exp((epoch / args.epochs) * math.log(final_lr / initial_lr))
-            # for param_group in optimizer.param_groups:
-            #     param_group['lr'] = current_lr
             batch_loss = []
             for batch_idx, (x, labels) in enumerate(train_data):
                 x, labels = x.to(device), labels.to(device)

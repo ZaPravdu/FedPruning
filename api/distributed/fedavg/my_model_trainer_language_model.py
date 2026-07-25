@@ -33,10 +33,22 @@ class MyModelTrainer(ModelTrainer):
         model.train()
 
         # train and update
+        # ── Cosine annealing LR across rounds ──
+        current_lr = args.initial_lr
+        round_idx = getattr(args, "round_idx", None)
+        if args.final_lr is not None and round_idx is not None and args.comm_round > 0:
+            if round_idx >= args.comm_round:
+                current_lr = args.final_lr
+            else:
+                cos = math.cos(math.pi * round_idx / args.comm_round)
+                current_lr = args.final_lr + 0.5 * (args.initial_lr - args.final_lr) * (1 + cos)
+            logging.info(f"[LR_SCHED] round={round_idx} lr={current_lr:.6f} (init={args.initial_lr}, final={args.final_lr}, T_max={args.comm_round})")
+        # ────────────────────────────────────────
+
         if args.client_optimizer == "sgd":
-            optimizer = torch.optim.SGD(filter(lambda p: p.requires_grad, self.model.parameters()), lr=args.lr)
+            optimizer = torch.optim.SGD(filter(lambda p: p.requires_grad, self.model.parameters()), lr=current_lr)
         else:
-            optimizer = torch.optim.Adam(filter(lambda p: p.requires_grad, self.model.parameters()), lr=args.lr, weight_decay=args.wd, amsgrad=True)
+            optimizer = torch.optim.Adam(filter(lambda p: p.requires_grad, self.model.parameters()), lr=current_lr, weight_decay=args.wd, amsgrad=True)
 
         local_epochs = args.epochs
 
