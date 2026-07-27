@@ -81,9 +81,16 @@ class FedDSTAggregator(object):
         wandb.log({"Density/ClientLocal_avg": avg, "round": round_idx})
 
     def log_communication_cost(self, round_idx, num_clients):
+        # Model-specific bit-to-parameter ratio coefficient
+        _MODEL_COEFF = {
+            "resnet18": 0.012,
+            "shufflenet": 0.001333333,
+        }
+        coeff = _MODEL_COEFF.get(self.args.model, 1.0)
+
         server_density = self.trainer.model.compute_density()
         mean_client_density = getattr(self, 'last_mean_client_density', 0.0)
-        round_cost = (server_density + mean_client_density) * num_clients
+        round_cost = (server_density + mean_client_density) * num_clients * coeff
         self.comm_cumulative_cost += round_cost
         wandb.log({"Comm/CumulativeCost": self.comm_cumulative_cost, "round": round_idx})
 
