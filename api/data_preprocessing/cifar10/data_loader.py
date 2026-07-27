@@ -180,7 +180,11 @@ def get_dataloader_CIFAR10(datadir, train_bs, test_bs, dataidxs=None):
     train_ds = dl_obj(datadir, dataidxs=dataidxs, train=True, transform=transform_train, download=True)
     test_ds = dl_obj(datadir, train=False, transform=transform_test, download=True)
 
-    train_dl = data.DataLoader(dataset=train_ds, batch_size=train_bs, shuffle=True, drop_last=True)
+    # When a client has fewer samples than batch_size, drop_last=True
+    # would produce an empty DataLoader → StopIteration on next(iter(...)).
+    # Use drop_last=False so the partial batch is yielded instead.
+    dl_drop_last = not (dataidxs is not None and len(train_ds) < train_bs)
+    train_dl = data.DataLoader(dataset=train_ds, batch_size=train_bs, shuffle=True, drop_last=dl_drop_last)
     test_dl = data.DataLoader(dataset=test_ds, batch_size=test_bs, shuffle=False, drop_last=True)
 
     return train_dl, test_dl
@@ -193,7 +197,9 @@ def get_dataloader_CIFAR10_ust(datadir, train_bs, test_bs, dataidxs=None):
     train_ds = dl_obj(datadir, dataidxs=dataidxs, train=True, transform=transform_train, download=True)
     test_ds = dl_obj(datadir, train=False, transform=transform_test, download=True)
 
-    train_dl = data.DataLoader(dataset=train_ds, batch_size=train_bs, shuffle=True, drop_last=True)
+    # Same safeguard for the ust variant
+    dl_drop_last = not (dataidxs is not None and len(train_ds) < train_bs)
+    train_dl = data.DataLoader(dataset=train_ds, batch_size=train_bs, shuffle=True, drop_last=dl_drop_last)
     test_dl = data.DataLoader(dataset=test_ds, batch_size=test_bs, shuffle=False, drop_last=True)
 
     return train_dl, test_dl
