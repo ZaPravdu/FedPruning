@@ -84,7 +84,6 @@ def magnitude_prune(weight, old_mask, num_elements, density):
     return new_mask
 
 def random_prune(old_mask, num_elements, density):
-    weight = weight * old_mask
     num_remain = int(num_elements * density)
     current_num_element = old_mask.sum()
     assert current_num_element >= num_remain

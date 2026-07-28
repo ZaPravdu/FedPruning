@@ -63,7 +63,7 @@ def add_args(parser):
                         help="how many epochs will be trained before pruning and growing; default uses half of local epochs in adjustment rounds")
     parser.add_argument("--comm_round", type=int, default=2, help="communication rounds")
     parser.add_argument("--frequency_of_the_test", type=int, default=5, help="test frequency")
-    parser.add_argument('--pruning_strategy', type=str, default="ERK_magnitude",
+    parser.add_argument('--pruning_strategy', type=str, default="ERK_random",
                         help='the distribution of layerwise density and the pruning method, options["uniform_magnitude", "ER_magnitude", "ERK_magnitude"]')
     parser.add_argument('--target_density', type=float, default=0.5, help='pruning target density')
     parser.add_argument('--delta_T', type=int, default=1, help='delta t for update')
