@@ -12,7 +12,7 @@ class SparseModel(nn.Module):
                  target_density:float=0.5,
                  strategy:str="ERK_magnitude",
                  mask_dict: dict = {},
-                 ignore_layers:list[int, str, type]=[".*bias.*", ".*\.gate$", ".*\.log_sigma2$", nn.BatchNorm2d, ".*bn.*", nn.LayerNorm, ".*ln.*"],
+                 ignore_layers:list[int, str, type]=[".*bias.*", ".*\.gate$", ".*\.log_sigma2$", nn.BatchNorm2d, ".*bn.*", nn.LayerNorm, ".*ln.*", r"stage.*\.branch1\.2", r"stage.*\.branch2\.0", r"stage.*\.branch2\.5", r"conv5\.0"],
                  device = None,
                  init_density = None,
                  ):
